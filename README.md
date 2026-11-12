@@ -1,15 +1,15 @@
 <div align="center">
 
-# ⚡ Projecto 9x — Autonomous Live Restreamer
-### Motor Inteligente de Retransmisión en Vivo Multi-Plataforma (YouTube &rarr; TikTok / Multi-RTMP)
+# ⚡ Projecto 9x — Multi-Stream Live Restreamer & Donation Engine
+### Motor Inteligente de Retransmisión Simultánea Multi-Cuenta con Aceleración GPU VAAPI
 
 [![Node.js](https://img.shields.io/badge/Node.js-v22-green.svg)](https://nodejs.org/)
 [![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
-[![FFmpeg](https://img.shields.io/badge/FFmpeg-7.1-orange.svg)](https://ffmpeg.org/)
+[![FFmpeg](https://img.shields.io/badge/FFmpeg-7.1%20VAAPI-orange.svg)](https://ffmpeg.org/)
 [![AI-Powered](https://img.shields.io/badge/Developed%20with-Artificial%20Intelligence-purple.svg)](#-desarrollado-con-inteligencia-artificial)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 
-*Sistema autónomo de captura y retransmisión de directos en alta calidad hacia TikTok Live, Kick, YouTube, Twitch y Facebook con bypass anti-bot, inyección de metadatos SEI y auto-detección de fin de emisión.*
+*Sistema autónomo multi-cuenta para capturar múltiples directos simultáneamente (YouTube Live, Twitch, Kick) y retransmitirlos con codificación hardware Intel VAAPI, banners de donación editables en vivo, proxy SEI anti-baneo en TikTok y auto-detección de fin de emisión.*
 
 ---
 
@@ -17,56 +17,43 @@
 
 ## 🤖 Desarrollado con Inteligencia Artificial
 
-> **Nota de autoría**: Este proyecto ha sido **completamente diseñado, programado y optimizado por Inteligencia Artificial (Antigravity AI Agent)**. Desde la arquitectura de multiplexado en memoria hasta el proxy SEI firmado y el panel web reactivo, cada componente fue concebido mediante ingeniería de software guiada por agentes autónomos de última generación.
+> **Nota de autoría**: Este proyecto ha sido **completamente diseñado, programado y optimizado por Inteligencia Artificial (Antigravity AI Agent)**. Desde el motor concurrente multi-slot (`StreamManager`) y el almacén aislado de cuentas (`AccountStore`), hasta la codificación por hardware VAAPI con blur optimizado y el proxy SEI firmado por sesión, toda la arquitectura fue construida mediante ingeniería de software asistida por IA.
 
 ---
 
 ## 🌟 Características Principales
 
-- **🎯 Retransmisión Multi-Destino:** Captura streams en directo desde **YouTube Live**, Twitch, Kick y más de 1,800 plataformas y los retransmite en tiempo real hacia **TikTok Live**, Kick, YouTube Live, Twitch o servidores RTMP/RTMPS personalizados.
-- **🛡️ Evasión Anti-Bot en YouTube:** Ingesta mediante `yt-dlp` calibrado tácticamente (`player_client=ios,android,tv,mweb`) evitando desafíos BotGuard, errores HTTP 403 y estrangulamiento de velocidad de descarga (*n-challenge throttling*).
-- **🔒 Proxy SEI Anti-Baneo para TikTok Live:** Integración de un proxy RTMP local (`rtmp://127.0.0.1:19350/live/obs`) que analiza el flujo H.264 e inyecta paquetes **SEI NAL tipo 100** firmados en tiempo real. Esto emula fielmente a **TikTok LIVE Studio**, impidiendo suspensiones, *shadowbans* o caídas por algoritmos de detección de streamers automatizados.
-- **🏁 Detección Automática de Finalización del Directo:** Detecta cuando el emisor original termina la transmisión (`#EXT-X-ENDLIST`), cerrando limpiamente el pipeline de FFmpeg, notificando al usuario y liberando los recursos de la sala sin bucles infinitos ni procesos zombis.
-- **📐 Formatos de Video Adaptativos:**
-  1. **📱 Vertical 9:16 (Fondo Blur Profesional):** Canvas vertical 1080x1920 con el video 16:9 centrado en nitidez máxima y un fondo dinámico ampliado con desenfoque Gaussiano.
-  2. **📱 Vertical 9:16 (Recorte Centrado):** Crop inteligente del centro de la acción para pantallas verticales completas.
-  3. **🖥️ Copia Directa 16:9 (Passthrough):** Muxing directo `-c copy` con **0% de consumo de CPU/GPU**.
-- **📊 Calidad Estricta de Emisión (CBR & GOP = 2s):** Codificación conforme a las especificaciones exactas de TikTok y YouTube (CBR a 4500 kbps, GOP exacto de 2.0 segundos con `-sc_threshold 0`, audio AAC-LC estéreo a 44.1 kHz).
-- **🖥️ Dashboard Web Reactivo:** Interfaz gráfica moderna en tema oscuro (*Dark Mode*) con telemetría en tiempo real (FPS, Bitrate, Velocidad, Frames, Uptime) transmitida mediante **Server-Sent Events (SSE)**.
+- **👥 Gestión Multi-Cuenta Real:** Registra y verifica múltiples cuentas destino (**TikTok Live** con Cookies JSON independientes o RTMP manual, **YouTube Live**, **Kick**, **Twitch**, **Facebook Live** o servidores **RTMP/RTMPS** personalizados).
+- **📡 Multi-Stream Simultáneo Aislado:** Ejecuta múltiples transmisiones distintas al mismo tiempo (`Slot #stream-1`, `#stream-2`, ...). Cada directo opera en su propio puerto de Proxy SEI (`19350–19449`), carpeta aislada de sesión/cola y limpieza segura por árbol de procesos.
+- **⚡ Aceleración Hardware Intel VAAPI + Blur Rápido:** Descarga la codificación H.264 al chip gráfico (`h264_vaapi` en `/dev/dri/renderD128`) con respaldo automático a `libx264`. El modo Vertical Blur procesa el desenfoque sobre un lienzo reducido (`180x320`, reduciendo drásticamente la carga de CPU) antes de reescalar a `720p30`, `1080p30` o `1080p60`.
+- **💖 Sistema de Donaciones Visuales en Vivo:** Overlay nativo mediante `drawtext` con lectura dinámica (`textfile` + `reload=30`), ajuste automático de línea y modo **Periódico** (aparece cada *N* segundos durante *X* segundos) o **Fijo**, sin alterar el audio del directo. Permite actualizar el mensaje de donación desde el panel web sin reiniciar el stream.
+- **🛡️ Evasión Anti-Bot y Proxy SEI Anti-Baneo:** Ingesta mediante `yt-dlp` calibrado (`player_client=ios,android,tv,mweb`), limpieza de paquetes SEI previos y firma de paquetes **SEI NALU tipo 100** mediante `ffmpeg_sei_proxy.py` por cada instancia de TikTok Live.
+- **🏁 Auto-Detección de Fin y Reconexión Anti-Caídas:** Reconoce `#EXT-X-ENDLIST` al finalizar la transmisión origen para cerrar la sala limpiamente, o reconecta de forma controlada si se habilita.
+- **🖥️ Panel Web Reactivo con Telemetría en Tiempo Real:** Monitor por SSE (`/api/stream/events`) con métricas por transmisión (FPS, Bitrate, Velocidad, Uptime, enlace a Sala TikTok, visor de logs individual) y telemetría del servidor (GPU VAAPI, CPU %, RAM y temperatura).
 
 ---
 
 ## 🏗️ Arquitectura Técnica
 
 ```text
-       [ En Vivo de YouTube / Twitch / Kick ]
-                         │
-                         ▼ (HLS / MPEG-TS Stream)
-         ┌───────────────────────────────┐
-         │     yt-dlp Anti-Bot Ingest    │  ◄── (Evasión InnerTube & BotGuard)
-         └───────────────┬───────────────┘
-                         │
-                         ▼ (Binary Pipe stdin)
-         ┌───────────────────────────────┐
-         │          FFmpeg Core          │
-         │  - Vertical 9:16 Blur Canvas  │
-         │  - Strict CBR 4500k & GOP 2s  │
-         │  - AAC 128k / 44.1 kHz Audio  │
-         └───────────────┬───────────────┘
-                         │ (FLV Stream)
-                         │
-        ┌────────────────┴────────────────┐
-        ▼                                 ▼
-[ Plataformas RTMP ]           [ TikTok LIVE Ingest ]
- (YouTube, Kick, Twitch)                  │
- (Push Directo)                           ▼
-                         ┌─────────────────────────────────┐
-                         │      ffmpeg_sei_proxy.py        │
-                         │   (Inyección SEI NALU Tipo 100) │
-                         └────────────────┬────────────────┘
-                                          │
-                                          ▼
-                                [ Servidores TikTok ]
+   [ Múltiples Orígenes: YouTube Live / Twitch / Kick ]
+                          │
+        ┌─────────────────┴─────────────────┐
+        ▼ Slot 1                            ▼ Slot N
+┌───────────────────┐               ┌───────────────────┐
+│ yt-dlp + FFmpeg   │               │ yt-dlp + FFmpeg   │
+│ - Blur Rápido     │               │ - Crop / VAAPI    │
+│ - drawtext Donac. │               │ - drawtext Donac. │
+│ - h264_vaapi GPU  │               │ - h264_vaapi GPU  │
+└─────────┬─────────┘               └─────────┬─────────┘
+          │ FLV -> RTMP :19350                │ FLV -> RTMP :19351 / Directo
+          ▼                                   ▼
+┌─────────────────────────┐         ┌─────────────────────────┐
+│ ffmpeg_sei_proxy.py     │         │ Canal Destino Aislado   │
+│ (queue/stream-1/ + SEI) │         │ (TikTok #2 / YouTube /  │
+└─────────┬───────────────┘         │  Kick / Twitch)         │
+          ▼                         └─────────────────────────┘
+  [ TikTok Cuenta #1 ]
 ```
 
 ---
@@ -74,10 +61,11 @@
 ## 🚀 Instalación y Puesta en Marcha
 
 ### Prerrequisitos
-- **Node.js** v18+ y **npm**
+- **Node.js** v20+ y **npm**
 - **Python** 3.10+
-- **FFmpeg** con soporte para `libx264` y `aac`
+- **FFmpeg** con soporte para `h264_vaapi` (opcional, recomendado en Linux Intel/AMD), `libx264`, `drawtext` (`libfreetype`) y `aac`
 - **yt-dlp** actualizado
+- En Linux con GPU Intel/AMD: incluir al usuario del servicio en el grupo `render` (`sudo usermod -aG render $USER`) para acceder a `/dev/dri/renderD128`.
 
 ### 1. Clonar el Repositorio
 ```bash
@@ -127,13 +115,15 @@ pm2 monit
 
 ---
 
-## 📱 Modos de Emisión en TikTok
+## 👥 Multi-Cuenta y Modos de Emisión
 
-### Opción 1: Creación Automática de Sala (Recomendada)
-Coloca tu archivo `tiktok_cookies.json` en `tiktok/cookies/` y configura tu clave de RapidAPI en `tiktok/.env`. El sistema creará la sala automáticamente, conectará el proxy SEI y emitirá con un solo clic sin necesidad de ingresar claves manualmente.
+Desde la pestaña **Cuentas de Emisión** del dashboard puedes registrar y verificar tantas cuentas como necesites:
 
-### Opción 2: Stream Key Manual con Proxy SEI
-Pega tu servidor RTMP y clave de transmisión generada por **TikTok LIVE Studio**. El sistema enrutará automáticamente el flujo por el proxy SEI para garantizar la integridad y evitar bloqueos.
+### Opción 1: TikTok Auto-Sala + Proxy SEI (Recomendada)
+Sube o pega el arreglo JSON de cookies de cada cuenta de TikTok directamente desde la interfaz web (se almacenan aisladas en `tiktok/accounts/<id>/cookies.json`). Cada cuenta se verifica con TikTok Live, crea su sala de forma autónoma y utiliza su propio puerto de Proxy SEI.
+
+### Opción 2: RTMP Manual (+ Proxy SEI en TikTok)
+Configura el servidor RTMP y la Stream Key de **YouTube Live**, **Kick**, **Twitch**, **Facebook Live** o **TikTok LIVE Studio**. En cuentas de TikTok manuales, el flujo continúa pasando por el Proxy SEI anti-detección.
 
 ---
 

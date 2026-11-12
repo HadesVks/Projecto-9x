@@ -1,64 +1,45 @@
 import express from 'express';
-import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { StreamEngine } from './stream_engine.js';
+import { AccountStore } from './account_store.js';
+import { StreamManager, QUALITY_PROFILES } from './stream_engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CONFIG_PATH = path.join(__dirname, 'config.json');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Cargar configuración persistente
-function loadConfig() {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
-    }
-  } catch (err) {
-    console.error('Error leyendo config.json:', err.message);
-  }
-  return {
-    port: 9090,
-    lastConfig: {},
-    savedPresets: {}
-  };
-}
+const store = new AccountStore();
+const manager = new StreamManager();
 
-function saveConfig(data) {
-  try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Error guardando config.json:', err.message);
-  }
-}
-
-let appConfig = loadConfig();
-const engine = new StreamEngine();
-
-// SSE (Server-Sent Events) clients
 const sseClients = new Set();
 
-function broadcastEvent(eventName, data) {
-  const payload = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+function broadcast(eventName, payload) {
+  const frame = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
   for (const client of sseClients) {
     try {
-      client.write(payload);
-    } catch (e) {
+      client.write(frame);
+    } catch {
       sseClients.delete(client);
     }
   }
 }
 
-// Suscribir eventos del motor a SSE
-engine.on('status', (status) => broadcastEvent('status', status));
-engine.on('log', (log) => broadcastEvent('log', log));
-engine.on('stats', (stats) => broadcastEvent('stats', stats));
+manager.on('stream_status', (s) => broadcast('stream_status', s));
+manager.on('stream_stats', (p) => broadcast('stream_stats', p));
+manager.on('stream_log', (l) => broadcast('stream_log', l));
+manager.on('stream_removed', (r) => broadcast('stream_removed', r));
 
-// SSE Endpoint
+// Emitir métricas del sistema cada 4s mientras haya clientes conectados
+setInterval(() => {
+  if (sseClients.size > 0) {
+    broadcast('system', manager.getSystemMetrics());
+  }
+}, 4000);
+
+// SSE Stream
 app.get('/api/stream/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -66,117 +47,177 @@ app.get('/api/stream/events', (req, res) => {
   res.flushHeaders();
 
   sseClients.add(res);
+  res.write(`event: init\ndata: ${JSON.stringify({
+    streams: manager.listStreams(),
+    system: manager.getSystemMetrics()
+  })}\n\n`);
 
-  // Enviar estado inicial y logs
-  res.write(`event: status\ndata: ${JSON.stringify(engine.getStatus())}\n\n`);
-  res.write(`event: init_logs\ndata: ${JSON.stringify(engine.getLogs())}\n\n`);
-
-  // Heartbeat cada 15 segundos
-  const pingInterval = setInterval(() => {
-    res.write(': keepalive\n\n');
+  const keepAlive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch {}
   }, 15000);
 
   req.on('close', () => {
-    clearInterval(pingInterval);
+    clearInterval(keepAlive);
     sseClients.delete(res);
   });
 });
 
-// Obtener Configuración y Presets
-app.get('/api/config', (req, res) => {
+// Bootstrap inicial para el Dashboard
+app.get('/api/bootstrap', (req, res) => {
   res.json({
-    presets: appConfig.savedPresets || {},
-    lastConfig: appConfig.lastConfig || {}
+    presets: store.getPresets(),
+    qualityProfiles: QUALITY_PROFILES,
+    accounts: store.listAccountsSafe(),
+    streams: manager.listStreams(),
+    donationDefaults: store.getDonationDefaults(),
+    lastConfig: store.getLastConfig(),
+    system: manager.getSystemMetrics()
   });
 });
 
-// Guardar Configuración / Presets
-app.post('/api/config', (req, res) => {
-  const { presets, lastConfig } = req.body;
-  if (presets) appConfig.savedPresets = presets;
-  if (lastConfig) appConfig.lastConfig = { ...appConfig.lastConfig, ...lastConfig };
-  saveConfig(appConfig);
-  res.json({ success: true, message: 'Configuración guardada.' });
+// --- Cuentas (Multi-Cuenta) ---
+app.get('/api/accounts', (req, res) => {
+  res.json({ accounts: store.listAccountsSafe() });
 });
 
-// Verificar estado de sesión y cookies de TikTok
-app.get('/api/tiktok/verify', async (req, res) => {
+app.post('/api/accounts', async (req, res) => {
   try {
-    const result = await engine.verifyTikTokSession();
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ valid: false, error: err.message });
-  }
-});
-
-// Estado actual del motor
-app.get('/api/status', (req, res) => {
-  res.json({
-    ...engine.getStatus(),
-    logs: engine.getLogs().slice(-50)
-  });
-});
-
-// Iniciar Transmisión
-app.post('/api/stream/start', async (req, res) => {
-  try {
-    const { 
-      sourceUrl, 
-      platform, 
-      rtmpServer, 
-      streamKey, 
-      mode, 
-      autoReconnect, 
-      reconnectDelay,
-      tiktokAutoRoom,
-      tiktokTitle 
-    } = req.body;
-
-    appConfig.lastConfig = {
-      sourceUrl,
-      platform,
-      rtmpServer,
-      streamKey,
-      mode,
-      autoReconnect,
-      reconnectDelay,
-      tiktokAutoRoom: !!tiktokAutoRoom,
-      tiktokTitle: tiktokTitle || ''
-    };
-    saveConfig(appConfig);
-
-    await engine.start({
-      sourceUrl,
-      platform,
-      rtmpServer,
-      streamKey,
-      mode,
-      autoReconnect,
-      reconnectDelay,
-      tiktokAutoRoom,
-      tiktokTitle
-    });
-
-    res.json({ success: true, message: 'Transmisión iniciada con éxito.' });
+    const acc = store.createAccount(req.body);
+    if (acc.platform === 'tiktok' && acc.authType === 'cookies') {
+      try {
+        await store.verifyTikTokAccount(acc.id);
+      } catch {}
+    }
+    res.json({ success: true, account: store.listAccountsSafe().find((a) => a.id === acc.id) });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
 });
 
-// Detener Transmisión
-app.post('/api/stream/stop', async (req, res) => {
+app.post('/api/accounts/:id/verify', async (req, res) => {
   try {
-    const result = await engine.stop();
-    res.json({ success: true, ...result });
+    const result = await store.verifyTikTokAccount(req.params.id);
+    res.json({
+      success: true,
+      result,
+      account: store.listAccountsSafe().find((a) => a.id === req.params.id)
+    });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(400).json({ success: false, error: err.message });
   }
 });
 
-const PORT = process.env.PORT || appConfig.port || 9090;
+app.delete('/api/accounts/:id', (req, res) => {
+  try {
+    if (manager.isAccountInUse(req.params.id)) {
+      return res.status(409).json({
+        success: false,
+        error: 'Esta cuenta está transmitiendo en vivo actualmente. Detén el stream primero.'
+      });
+    }
+    const result = store.deleteAccount(req.params.id);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// --- Donaciones ---
+app.patch('/api/donations/defaults', (req, res) => {
+  const updated = store.updateDonationDefaults(req.body || {});
+  res.json({ success: true, donationDefaults: updated });
+});
+
+app.patch('/api/streams/:id/donation', (req, res) => {
+  try {
+    const updated = manager.updateDonation(req.params.id, req.body || {});
+    res.json({ success: true, donation: updated });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// --- Transmisiones (Multi-Stream Simultáneo) ---
+app.get('/api/streams', (req, res) => {
+  res.json({ streams: manager.listStreams() });
+});
+
+app.get('/api/streams/:id/logs', (req, res) => {
+  res.json({ logs: manager.getStreamLogs(req.params.id) });
+});
+
+app.post('/api/streams', async (req, res) => {
+  try {
+    const {
+      sourceUrl,
+      accountId,
+      mode,
+      quality,
+      encoder,
+      tiktokTitle,
+      autoReconnect,
+      reconnectDelay,
+      donation
+    } = req.body;
+
+    const account = store.getAccountRaw(accountId);
+    if (!account) {
+      return res.status(400).json({ success: false, error: 'Cuenta destino inválida o no encontrada.' });
+    }
+
+    store.saveLastConfig({
+      sourceUrl,
+      accountId,
+      mode,
+      quality,
+      encoder,
+      tiktokTitle,
+      autoReconnect,
+      reconnectDelay
+    });
+    if (donation) {
+      store.updateDonationDefaults(donation);
+    }
+
+    const summary = await manager.createAndStartStream({
+      sourceUrl,
+      mode,
+      quality,
+      encoder,
+      tiktokTitle,
+      autoReconnect,
+      reconnectDelay,
+      donation
+    }, account);
+
+    res.json({ success: true, stream: summary });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/streams/:id/stop', async (req, res) => {
+  try {
+    const result = await manager.stopStream(req.params.id);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(404).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/streams/:id', async (req, res) => {
+  try {
+    const result = await manager.removeStream(req.params.id);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(404).json({ success: false, error: err.message });
+  }
+});
+
+const PORT = process.env.PORT || store.getPort() || 9090;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
-  console.log(` Projecto 9x — Panel Web Activo en puerto ${PORT}`);
+  console.log(` Projecto 9x v2 — Multi-Stream & GPU VAAPI en :${PORT}`);
   console.log(` LAN:       http://10.0.0.3:${PORT}`);
   console.log(` Tailscale: http://100.109.45.25:${PORT}`);
   console.log(`====================================================`);

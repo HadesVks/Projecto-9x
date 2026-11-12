@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Projecto 9x — Retransmisor En Vivo Inteligente</title>
+  <title>Projecto 9x — Multi-Stream En Vivo &amp; Donaciones</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,221 +14,236 @@
         <div class="logo-badge">9X</div>
         <div class="brand-text">
           <h1>Projecto 9x</h1>
-          <p>Motor de Retransmisión en Vivo • YouTube &rarr; TikTok / Multi-RTMP</p>
+          <p>Multi-Stream En Vivo • GPU VAAPI • Proxy SEI Anti-Baneo</p>
         </div>
       </div>
-      <div class="header-status">
-        <div id="liveBadge" class="badge badge-idle">
-          <span class="dot"></span>
-          <span id="liveStatusText">INACTIVO</span>
-        </div>
-        <div class="uptime-box">
-          <span class="label">Uptime:</span>
-          <span id="uptimeDisplay" class="value">00:00:00</span>
-        </div>
+
+      <div class="system-pills">
+        <div id="vaapiPill" class="sys-pill">⚡ GPU: Comprobando...</div>
+        <div id="activeStreamsPill" class="sys-pill">📡 0 en vivo</div>
+        <div id="sysResourcesPill" class="sys-pill">CPU --% • RAM --/-- GB</div>
       </div>
     </header>
 
-    <!-- Main Content Layout -->
-    <main class="dashboard-grid">
-      <!-- Panel de Control -->
-      <section class="card config-card">
-        <div class="card-header">
-          <h2>Configuración de la Transmisión</h2>
-          <span class="tag">Controles de Emisión</span>
-        </div>
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button type="button" class="tab-btn active" data-tab="streams">📡 Transmisiones Simultáneas</button>
+      <button type="button" class="tab-btn" data-tab="accounts">👥 Cuentas de Emisión (<span id="accountsCount">0</span>)</button>
+    </nav>
 
-        <form id="streamForm" class="stream-form" onsubmit="return false;">
-          <!-- Enlace de Origen -->
-          <div class="form-group">
-            <label for="sourceUrl">
-              <span class="icon">📺</span> Enlace del En Vivo de Origen (YouTube / Twitch / Kick)
-            </label>
-            <input 
-              type="url" 
-              id="sourceUrl" 
-              placeholder="https://www.youtube.com/watch?v=... o https://youtube.com/live/..." 
-              required
-            />
-            <small class="hint">Detección automática de estado en directo y cierre limpio al finalizar.</small>
+    <!-- TAB 1: STREAMS -->
+    <section id="tab-streams" class="tab-panel active">
+      <div class="dashboard-grid">
+        <!-- Nuevo Stream -->
+        <section class="card config-card">
+          <div class="card-header">
+            <h2>Lanzar Nuevo En Vivo</h2>
+            <span class="tag tag-accent">Multi-Live</span>
           </div>
 
-          <!-- Selector de Plataforma -->
-          <div class="form-row">
-            <div class="form-group col-half">
-              <label for="platformSelect">
-                <span class="icon">🎯</span> Plataforma Destino
-              </label>
-              <select id="platformSelect">
-                <option value="tiktok">TikTok Live (Con Proxy SEI)</option>
-                <option value="youtube">YouTube Live</option>
-                <option value="kick">Kick</option>
-                <option value="twitch">Twitch</option>
-                <option value="facebook">Facebook Live</option>
-                <option value="custom">Personalizado (RTMP/RTMPS)</option>
-              </select>
+          <form id="streamForm" class="stream-form" onsubmit="return false;">
+            <div class="form-group">
+              <label for="accountSelect">👤 Cuenta Destino</label>
+              <select id="accountSelect" required></select>
+              <small class="hint">Puedes transmitir en varias cuentas a la vez con distintos directos.</small>
             </div>
 
-            <div class="form-group col-half" id="rtmpServerGroup">
-              <label for="rtmpServer">
-                <span class="icon">🌐</span> Servidor RTMP Destino
-              </label>
-              <input 
-                type="text" 
-                id="rtmpServer" 
-                placeholder="rtmp://push-rtmp-l9.tiktokcdn.com/stage/" 
+            <div class="form-group">
+              <label for="sourceUrl">📺 URL del En Vivo de Origen (YouTube / Twitch / Kick)</label>
+              <input
+                type="url"
+                id="sourceUrl"
+                placeholder="https://www.youtube.com/live/..."
                 required
               />
             </div>
-          </div>
 
-          <!-- Caja Especial TikTok (Detección de Cookies / SEI) -->
-          <div id="tiktokSpecialBox" class="tiktok-box">
-            <div class="tiktok-box-header">
-              <div class="tiktok-status">
-                <span id="tiktokShield" class="shield-badge">🛡️ Sesión TikTok: Verificando...</span>
+            <div class="form-group" id="tiktokTitleGroup">
+              <label for="tiktokTitle">📝 Título de la Sala en TikTok</label>
+              <input type="text" id="tiktokTitle" placeholder="⚡ En Vivo 24/7 | Apoya el Canal" />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-half">
+                <label for="modeSelect">📐 Formato</label>
+                <select id="modeSelect">
+                  <option value="vertical_blur">📱 Vertical 9:16 (Fondo Blur Rápido)</option>
+                  <option value="vertical_crop">📱 Vertical 9:16 (Recorte Centrado)</option>
+                  <option value="copy">🖥️ Horizontal 16:9 / Copia Directa</option>
+                </select>
               </div>
-              <button type="button" id="checkTikTokBtn" class="btn-mini">Comprobar</button>
+              <div class="form-group col-half">
+                <label for="qualitySelect">🎞️ Calidad y Fluidez</label>
+                <select id="qualitySelect">
+                  <option value="720p30">720p 30fps (2.8M • Ideal 2-4 lives)</option>
+                  <option value="1080p30" selected>1080p 30fps (4.5M • Alta Calidad)</option>
+                  <option value="1080p60">1080p 60fps (6.0M • Fluidez Máxima)</option>
+                </select>
+              </div>
             </div>
 
-            <label class="checkbox-container tiktok-auto-label">
-              <input type="checkbox" id="tiktokAutoRoom" checked />
-              <span class="checkmark"></span>
-              <strong>Crear Sala Automática en TikTok con Proxy SEI Anti-Baneo</strong>
-            </label>
+            <!-- Donaciones en el Stream -->
+            <div class="donation-box">
+              <div class="donation-header">
+                <label class="checkbox-container">
+                  <input type="checkbox" id="donEnabled" checked />
+                  <span>💖 <strong>Pedir Donaciones en Pantalla</strong></span>
+                </label>
+                <span class="tag">En Vivo</span>
+              </div>
 
-            <div class="form-group tiktok-title-group" id="tiktokTitleGroup">
-              <label for="tiktokTitle">Título del En Vivo en TikTok:</label>
-              <input type="text" id="tiktokTitle" placeholder="⚡ Transmisión en Vivo 24/7 | Projecto 9x" />
-            </div>
-          </div>
-
-          <!-- Clave de Transmisión (Stream Key) -->
-          <div class="form-group" id="streamKeyGroup">
-            <label for="streamKey">
-              <span class="icon">🔑</span> Clave de Transmisión (Stream Key)
-            </label>
-            <div class="password-wrapper">
-              <input 
-                type="password" 
-                id="streamKey" 
-                placeholder="Pega aquí tu Stream Key de destino..." 
-              />
-              <button type="button" id="toggleKeyBtn" class="toggle-btn" title="Mostrar/Ocultar clave">👁️</button>
-            </div>
-            <small class="hint" id="streamKeyHint">Generada en TikTok Live Studio o en el panel de tu plataforma.</small>
-          </div>
-
-          <!-- Modo de Video -->
-          <div class="form-group">
-            <label><span class="icon">📐</span> Formato de Video</label>
-            <div class="mode-selector">
-              <label class="mode-card active">
-                <input type="radio" name="videoMode" value="vertical_blur" checked />
-                <div class="mode-content">
-                  <div class="mode-title">📱 Vertical 9:16 (Fondo Blur Profesional)</div>
-                  <div class="mode-desc">Video 16:9 centrado nítido con fondo desenfocado dinámico. Formato óptimo para TikTok.</div>
+              <div id="donSettingsArea" class="don-settings">
+                <div class="form-group">
+                  <label for="donText">Mensaje que aparecerá en el video:</label>
+                  <input
+                    type="text"
+                    id="donText"
+                    placeholder="Apoya el directo ★ Donaciones: paypal.me/tuusuario"
+                  />
+                  <small class="hint">Puedes editar este texto en vivo sin cortar el stream.</small>
                 </div>
-              </label>
 
-              <label class="mode-card">
-                <input type="radio" name="videoMode" value="vertical_crop" />
-                <div class="mode-content">
-                  <div class="mode-title">📱 Vertical 9:16 (Recorte Centrado)</div>
-                  <div class="mode-desc">Recorta el centro de la transmisión a 9:16 completo sin barras ni bordes.</div>
+                <div class="form-row">
+                  <div class="form-group col-half">
+                    <label for="donPosition">Posición</label>
+                    <select id="donPosition">
+                      <option value="bottom">Abajo (Sobre botones TikTok)</option>
+                      <option value="center_bottom">Centro-Bajo</option>
+                      <option value="top">Arriba</option>
+                    </select>
+                  </div>
+                  <div class="form-group col-half">
+                    <label for="donDisplayMode">Frecuencia</label>
+                    <select id="donDisplayMode">
+                      <option value="periodic">Periódico (Recomendado)</option>
+                      <option value="always">Fijo (Siempre visible)</option>
+                    </select>
+                  </div>
                 </div>
-              </label>
 
-              <label class="mode-card">
-                <input type="radio" name="videoMode" value="copy" />
-                <div class="mode-content">
-                  <div class="mode-title">🖥️ Copia Directa 16:9 (Passthrough)</div>
-                  <div class="mode-desc">Transmisión original sin recodificar. Cero consumo de CPU/GPU. Ideal para YouTube o Kick.</div>
+                <div class="form-row" id="donTimingRow">
+                  <div class="form-group col-half">
+                    <label for="donInterval">Cada cuántos seg:</label>
+                    <input type="number" id="donInterval" value="180" min="15" max="3600" />
+                  </div>
+                  <div class="form-group col-half">
+                    <label for="donDuration">Duración visible (seg):</label>
+                    <input type="number" id="donDuration" value="25" min="5" max="600" />
+                  </div>
                 </div>
+              </div>
+            </div>
+
+            <!-- Reconexión -->
+            <div class="form-row options-row">
+              <label class="checkbox-container">
+                <input type="checkbox" id="autoReconnect" checked />
+                <span>Reconexión Automática anti-caídas</span>
               </label>
+              <div class="reconnect-delay-box">
+                <label for="reconnectDelay">Espera (s):</label>
+                <input type="number" id="reconnectDelay" value="5" min="2" max="60" />
+              </div>
             </div>
-          </div>
 
-          <!-- Opciones de Reconexión -->
-          <div class="form-row options-row">
-            <label class="checkbox-container">
-              <input type="checkbox" id="autoReconnect" checked />
-              <span class="checkmark"></span>
-              Reconexión Automática anti-caídas de red
-            </label>
-
-            <div class="reconnect-delay-box">
-              <label for="reconnectDelay">Espera (seg):</label>
-              <input type="number" id="reconnectDelay" value="5" min="2" max="60" />
-            </div>
-          </div>
-
-          <!-- Botones de Acción -->
-          <div class="action-buttons">
-            <button type="button" id="startBtn" class="btn btn-primary">
-              <span class="btn-icon">▶</span> Iniciar Retransmisión
+            <button type="button" id="launchStreamBtn" class="btn btn-primary">
+              ▶ Iniciar Transmisión
             </button>
-            <button type="button" id="stopBtn" class="btn btn-danger" disabled>
-              <span class="btn-icon">⏹</span> Detener Transmisión
+          </form>
+        </section>
+
+        <!-- Lista de Transmisiones Simultáneas -->
+        <section class="streams-column">
+          <div class="section-title-bar">
+            <h2>Monitor de Transmisiones</h2>
+            <span class="hint">Cada slot corre aislado con su propio puerto Proxy SEI y métricas</span>
+          </div>
+          <div id="streamsContainer" class="streams-list">
+            <div class="empty-state">
+              No hay transmisiones activas. Selecciona una cuenta y pega un enlace de YouTube para comenzar.
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- TAB 2: MULTI-CUENTA -->
+    <section id="tab-accounts" class="tab-panel">
+      <div class="dashboard-grid">
+        <!-- Agregar Cuenta -->
+        <section class="card">
+          <div class="card-header">
+            <h2>Agregar Nueva Cuenta</h2>
+            <span class="tag">Multi-Cuenta</span>
+          </div>
+
+          <form id="accountForm" class="stream-form" onsubmit="return false;">
+            <div class="form-group">
+              <label for="accName">🏷️ Nombre Identificador</label>
+              <input type="text" id="accName" placeholder="Ej: TikTok Gaming, YouTube Secundario..." required />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-half">
+                <label for="accPlatform">🎯 Plataforma</label>
+                <select id="accPlatform">
+                  <option value="tiktok">TikTok Live</option>
+                  <option value="youtube">YouTube Live</option>
+                  <option value="kick">Kick</option>
+                  <option value="twitch">Twitch</option>
+                  <option value="facebook">Facebook Live</option>
+                  <option value="custom">RTMP Personalizado</option>
+                </select>
+              </div>
+              <div class="form-group col-half" id="accAuthTypeGroup">
+                <label for="accAuthType">🔐 Método</label>
+                <select id="accAuthType">
+                  <option value="cookies">Cookies JSON (Auto-Sala + SEI)</option>
+                  <option value="manual">Stream Key Manual (+ SEI)</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="accCookiesArea" class="form-group">
+              <label for="accCookiesJson">🍪 Cookies de TikTok (JSON)</label>
+              <input type="file" id="accCookiesFile" accept=".json,application/json" class="file-input" />
+              <textarea
+                id="accCookiesJson"
+                rows="5"
+                placeholder='Pega aquí el arreglo JSON exportado con Cookie-Editor o sube el archivo .json arriba...'
+              ></textarea>
+            </div>
+
+            <div id="accManualArea" style="display: none;">
+              <div class="form-group">
+                <label for="accRtmpServer">🌐 Servidor RTMP</label>
+                <input type="text" id="accRtmpServer" placeholder="rtmp://..." />
+              </div>
+              <div class="form-group">
+                <label for="accStreamKey">🔑 Stream Key</label>
+                <input type="password" id="accStreamKey" placeholder="Pega tu clave de transmisión..." />
+              </div>
+            </div>
+
+            <button type="button" id="saveAccountBtn" class="btn btn-primary">
+              ➕ Guardar Cuenta
             </button>
-          </div>
-        </form>
-      </section>
+          </form>
+        </section>
 
-      <!-- Telemetría & Monitor -->
-      <section class="card monitor-card">
-        <div class="card-header">
-          <h2>Telemetría en Tiempo Real</h2>
-          <span class="tag tag-accent">Hardware HADES</span>
-        </div>
-
-        <div class="metrics-grid">
-          <div class="metric-box">
-            <span class="metric-label">FPS</span>
-            <span id="metricFps" class="metric-value">0.0</span>
+        <!-- Lista de Cuentas Guardadas -->
+        <section class="streams-column">
+          <div class="section-title-bar">
+            <h2>Cuentas Configuradas</h2>
+            <span class="hint">Puedes verificar el estado LIVE de cada cuenta TikTok antes de emitir</span>
           </div>
-          <div class="metric-box">
-            <span class="metric-label">Bitrate (CBR)</span>
-            <span id="metricBitrate" class="metric-value">0k</span>
-          </div>
-          <div class="metric-box">
-            <span class="metric-label">Velocidad</span>
-            <span id="metricSpeed" class="metric-value">0.0x</span>
-          </div>
-          <div class="metric-box">
-            <span class="metric-label">Frames Totales</span>
-            <span id="metricFrames" class="metric-value">0</span>
-          </div>
-        </div>
-
-        <div class="active-stream-info" id="streamInfoBox">
-          <div class="info-row">
-            <span class="info-label">Plataforma Destino:</span>
-            <span id="infoPlatform" class="info-val">Ninguna</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">Formato de Video:</span>
-            <span id="infoMode" class="info-val">Sin emisión</span>
-          </div>
-          <div class="info-row" id="shareUrlRow" style="display: none;">
-            <span class="info-label">Enlace de la Sala:</span>
-            <a id="infoShareLink" href="#" target="_blank" class="info-val link-val">Ver en TikTok &nearr;</a>
-          </div>
-        </div>
-
-        <!-- Terminal de Logs -->
-        <div class="logs-header">
-          <h3>Registro de Consola (Live Logs)</h3>
-          <button type="button" id="clearLogsBtn" class="btn-mini">Limpiar</button>
-        </div>
-        <div id="logsTerminal" class="logs-terminal">
-          <div class="log-entry log-info">[00:00:00] Sistema Projecto 9x listo para transmitir.</div>
-        </div>
-      </section>
-    </main>
+          <div id="accountsContainer" class="accounts-list"></div>
+        </section>
+      </div>
+    </section>
 
     <footer class="footer">
-      <p>Projecto 9x • Motor Autónomo Desarrollado con Inteligencia Artificial • Debian 13 HADES</p>
+      <p>Projecto 9x v2 • Desarrollado con Inteligencia Artificial • Aceleración Hardware Intel VAAPI</p>
     </footer>
   </div>
 

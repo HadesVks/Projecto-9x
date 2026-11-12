@@ -5,9 +5,12 @@ venv/
 
 # Sensitive Credentials & Session files
 .env
+config.json
 tiktok/.env
 tiktok/cookies/tiktok_cookies.json
+tiktok/accounts/
 tiktok/queue/
 tiktok/logs/
+donations/
 __pycache__/
 *.pyc
