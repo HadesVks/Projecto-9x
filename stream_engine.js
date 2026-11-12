@@ -23,6 +23,7 @@ export class StreamEngine extends EventEmitter {
     this.reconnectTimeout = null;
     this.isManualStop = false;
     this.ytdlpFinishedCleanly = false;
+    this.ffmpegStderrBuffer = [];
     this.logs = [];
     this.maxLogs = 250;
     this.stats = {
@@ -113,6 +114,7 @@ export class StreamEngine extends EventEmitter {
 
     this.isManualStop = false;
     this.ytdlpFinishedCleanly = false;
+    this.ffmpegStderrBuffer = [];
     this.config = {
       sourceUrl: config.sourceUrl.trim(),
       platform,
@@ -152,13 +154,18 @@ export class StreamEngine extends EventEmitter {
       this.addLog('warn', `Aviso pre-flight: ${err.message}. Intentando iniciar de todas formas...`);
     }
 
+    if (this.isManualStop) return;
+
     this.status = 'starting';
     this.emit('status', this.getStatus());
     await this._spawnPipeline();
   }
 
   async _spawnPipeline() {
+    if (this.isManualStop) return;
+
     let finalRtmpDestination = '';
+    this.ffmpegStderrBuffer = [];
 
     // Manejo de TikTok con Proxy SEI Anti-Baneo
     if (this.config.platform === 'tiktok') {
@@ -169,7 +176,12 @@ export class StreamEngine extends EventEmitter {
             TIKTOK_MGR,
             '--create',
             '--title', this.config.tiktokTitle
-          ], { timeout: 30000 });
+          ], { timeout: 35000 });
+
+          if (this.isManualStop) {
+            await this._cleanupTikTokSession();
+            return;
+          }
 
           this.tiktokSession = JSON.parse(stdout.trim());
           finalRtmpDestination = this.tiktokSession.local_proxy_url || 'rtmp://127.0.0.1:19350/live/obs';
@@ -178,13 +190,13 @@ export class StreamEngine extends EventEmitter {
             this.addLog('info', `Enlace para compartir: ${this.tiktokSession.share_url}`);
           }
         } catch (err) {
+          if (this.isManualStop) return;
           this.status = 'error';
           this.addLog('error', `Error creando sala en TikTok: ${err.message}`);
           this.emit('status', this.getStatus());
           return;
         }
       } else {
-        // Stream Key manual pero protegiendo con SEI Proxy
         const rawTarget = this.buildTargetUrl(this.config.rtmpServer, this.config.streamKey);
         this.addLog('info', 'Activando Proxy SEI anti-baneo para tu Stream Key de TikTok...');
         try {
@@ -192,6 +204,11 @@ export class StreamEngine extends EventEmitter {
             TIKTOK_MGR,
             '--proxy-only', rawTarget
           ], { timeout: 15000 });
+
+          if (this.isManualStop) {
+            await this._cleanupTikTokSession();
+            return;
+          }
 
           const proxyRes = JSON.parse(stdout.trim());
           finalRtmpDestination = proxyRes.proxy_url || 'rtmp://127.0.0.1:19350/live/obs';
@@ -202,13 +219,17 @@ export class StreamEngine extends EventEmitter {
         }
       }
     } else {
-      // Destino estándar directo (YouTube, Kick, Twitch, etc.)
       finalRtmpDestination = this.buildTargetUrl(this.config.rtmpServer, this.config.streamKey);
+    }
+
+    if (this.isManualStop) {
+      await this._cleanupTikTokSession();
+      return;
     }
 
     this.addLog('info', 'Iniciando ingestor yt-dlp con evasión anti-bloqueo...');
 
-    // 1. Iniciar yt-dlp con argumentos anti-bot validados
+    // Iniciar yt-dlp
     const ytdlpArgs = [
       '--js-runtimes', 'node',
       '--extractor-args', 'youtube:player_client=ios,android,tv,mweb',
@@ -234,19 +255,14 @@ export class StreamEngine extends EventEmitter {
       return;
     }
 
-    // 2. Construir argumentos FFmpeg con calidad estricta CBR y keyframe de 2s
+    // Argumentos FFmpeg limpios (sin opciones de red inválidas para pipe)
     let ffmpegArgs = [
       '-fflags', '+genpts+discardcorrupt',
-      '-reconnect', '1',
-      '-reconnect_at_eof', '0',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
       '-re',
       '-i', 'pipe:0'
     ];
 
     if (this.config.mode === 'copy') {
-      // Copia directa passthrough sin recodificar (cero uso de CPU)
       ffmpegArgs.push(
         '-c:v', 'copy',
         '-c:a', 'aac',
@@ -256,9 +272,9 @@ export class StreamEngine extends EventEmitter {
         finalRtmpDestination
       );
     } else if (this.config.mode === 'vertical_crop') {
-      // Recorte centrado a vertical 9:16 (1080x1920)
+      // Recorte centrado dinámico que funciona con cualquier aspecto (16:9, vertical 9:16 o 1:1)
       ffmpegArgs.push(
-        '-filter_complex', '[0:v]crop=ih*(9/16):ih,scale=1080:1920,setsar=1[v]',
+        '-filter_complex', "[0:v]crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)',scale=1080:1920,setsar=1[v]",
         '-map', '[v]',
         '-map', '0:a?',
         '-c:v', 'libx264',
@@ -281,9 +297,9 @@ export class StreamEngine extends EventEmitter {
         finalRtmpDestination
       );
     } else {
-      // Formato Vertical 9:16 Profesional con Fondo Blur Dinámico
+      // Modo Vertical 9:16 Profesional con Fondo Blur Dinámico y Centrado
       ffmpegArgs.push(
-        '-filter_complex', '[0:v]split=2[bg_src][fg_src];[bg_src]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=25:5[bg];[fg_src]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v_out]',
+        '-filter_complex', "[0:v]split=2[bg_src][fg_src];[bg_src]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(in_w-1080)/2:(in_h-1920)/2,boxblur=25:5[bg];[fg_src]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v_out]",
         '-map', '[v_out]',
         '-map', '0:a?',
         '-c:v', 'libx264',
@@ -348,6 +364,16 @@ export class StreamEngine extends EventEmitter {
 
     this.ffmpegProc.stderr.on('data', (chunk) => {
       const text = chunk.toString();
+      
+      // Guardar últimas líneas para depuración de fallos
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        this.ffmpegStderrBuffer.push(line);
+        if (this.ffmpegStderrBuffer.length > 25) {
+          this.ffmpegStderrBuffer.shift();
+        }
+      }
+
       const frameMatch = text.match(/frame=\s*(\d+)/);
       const fpsMatch = text.match(/fps=\s*([\d\.]+)/);
       const bitrateMatch = text.match(/bitrate=\s*([\d\.]+\w+\/s)/);
@@ -369,7 +395,7 @@ export class StreamEngine extends EventEmitter {
         this.emit('stats', this.getStatus().stats);
       } else {
         const clean = text.trim();
-        if (clean.includes('Connection refused') || clean.includes('Input/output error') || clean.includes('Server returned')) {
+        if (clean.includes('Error') || clean.includes('failed') || clean.includes('refused')) {
           this.addLog('error', `ffmpeg: ${clean}`);
         }
       }
@@ -412,6 +438,16 @@ export class StreamEngine extends EventEmitter {
       await this._cleanupTikTokSession();
       this.emit('status', this.getStatus());
       return;
+    }
+
+    // Si hubo código de error, extraer el detalle relevante del buffer de stderr
+    if (code !== 0 && this.ffmpegStderrBuffer.length > 0) {
+      const errorLines = this.ffmpegStderrBuffer.filter(l => 
+        l.includes('Error') || l.includes('Invalid') || l.includes('failed') || l.includes('not found') || l.includes('No such')
+      );
+      if (errorLines.length > 0) {
+        this.addLog('error', `FFmpeg Detalle: ${errorLines.slice(-2).join(' | ')}`);
+      }
     }
 
     this.addLog('warn', `El pipeline finalizó (código: ${code}).`);
