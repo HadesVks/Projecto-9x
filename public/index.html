@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Projecto 9x — Retransmisor En Vivo Multi-Plataforma</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="logo-badge">9X</div>
+        <div class="brand-text">
+          <h1>Projecto 9x</h1>
+          <p>Motor de Retransmisión en Vivo • YouTube &rarr; TikTok / Multi-RTMP</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <div id="liveBadge" class="badge badge-idle">
+          <span class="dot"></span>
+          <span id="liveStatusText">INACTIVO</span>
+        </div>
+        <div class="uptime-box">
+          <span class="label">Uptime:</span>
+          <span id="uptimeDisplay" class="value">00:00:00</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Layout -->
+    <main class="dashboard-grid">
+      <!-- Control Panel -->
+      <section class="card config-card">
+        <div class="card-header">
+          <h2>Configuración de la Transmisión</h2>
+          <span class="tag">Controles de Emisión</span>
+        </div>
+
+        <form id="streamForm" class="stream-form" onsubmit="return false;">
+          <!-- Origen -->
+          <div class="form-group">
+            <label for="sourceUrl">
+              <span class="icon">📺</span> URL del En Vivo de Origen (YouTube / Twitch / Kick)
+            </label>
+            <input 
+              type="url" 
+              id="sourceUrl" 
+              placeholder="https://www.youtube.com/watch?v=... o https://youtube.com/live/..." 
+              required
+            />
+            <small class="hint">Compatible con YouTube Live, Twitch, Kick y más de 1,800 plataformas.</small>
+          </div>
+
+          <!-- Plataforma Destino -->
+          <div class="form-row">
+            <div class="form-group col-half">
+              <label for="platformSelect">
+                <span class="icon">🎯</span> Plataforma Destino
+              </label>
+              <select id="platformSelect">
+                <option value="tiktok">TikTok Live</option>
+                <option value="kick">Kick</option>
+                <option value="youtube">YouTube Live</option>
+                <option value="twitch">Twitch</option>
+                <option value="facebook">Facebook Live</option>
+                <option value="custom">Personalizado (RTMP/RTMPS)</option>
+              </select>
+            </div>
+
+            <div class="form-group col-half">
+              <label for="rtmpServer">
+                <span class="icon">🌐</span> Servidor RTMP / URL de Emisión
+              </label>
+              <input 
+                type="text" 
+                id="rtmpServer" 
+                placeholder="rtmp://push-rtmp-l9.tiktokcdn.com/stage/" 
+                required
+              />
+            </div>
+          </div>
+
+          <!-- Clave de Transmisión -->
+          <div class="form-group">
+            <label for="streamKey">
+              <span class="icon">🔑</span> Clave de Transmisión (Stream Key)
+            </label>
+            <div class="password-wrapper">
+              <input 
+                type="password" 
+                id="streamKey" 
+                placeholder="Pega aquí tu Stream Key de TikTok o destino..." 
+                required
+              />
+              <button type="button" id="toggleKeyBtn" class="toggle-btn" title="Mostrar/Ocultar clave">👁️</button>
+            </div>
+            <small class="hint">Generada en TikTok Live Studio, Live Center o el panel de tu plataforma.</small>
+          </div>
+
+          <!-- Modo de Video -->
+          <div class="form-group">
+            <label><span class="icon">📐</span> Formato de Video</label>
+            <div class="mode-selector">
+              <label class="mode-card active">
+                <input type="radio" name="videoMode" value="vertical_blur" checked />
+                <div class="mode-content">
+                  <div class="mode-title">📱 Vertical 9:16 (Fondo Blur)</div>
+                  <div class="mode-desc">Video 16:9 centrado nítido con fondo desenfocado. Ideal para TikTok.</div>
+                </div>
+              </label>
+
+              <label class="mode-card">
+                <input type="radio" name="videoMode" value="vertical_crop" />
+                <div class="mode-content">
+                  <div class="mode-title">📱 Vertical 9:16 (Recorte Centrado)</div>
+                  <div class="mode-desc">Recorta el centro de la transmisión en 9:16 directo.</div>
+                </div>
+              </label>
+
+              <label class="mode-card">
+                <input type="radio" name="videoMode" value="copy" />
+                <div class="mode-content">
+                  <div class="mode-title">🖥️ Copia Directa 16:9 (Passthrough)</div>
+                  <div class="mode-desc">Transmisión original sin recodificar. Cero consumo de CPU.</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Opciones adicionales -->
+          <div class="form-row options-row">
+            <label class="checkbox-container">
+              <input type="checkbox" id="autoReconnect" checked />
+              <span class="checkmark"></span>
+              Reconexión Automática si se corta el en vivo
+            </label>
+
+            <div class="reconnect-delay-box">
+              <label for="reconnectDelay">Espera (seg):</label>
+              <input type="number" id="reconnectDelay" value="5" min="2" max="60" />
+            </div>
+          </div>
+
+          <!-- Botones de Acción -->
+          <div class="action-buttons">
+            <button type="button" id="startBtn" class="btn btn-primary">
+              <span class="btn-icon">▶</span> Iniciar Retransmisión
+            </button>
+            <button type="button" id="stopBtn" class="btn btn-danger" disabled>
+              <span class="btn-icon">⏹</span> Detener Transmisión
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Telemetría & Monitor -->
+      <section class="card monitor-card">
+        <div class="card-header">
+          <h2>Telemetría en Tiempo Real</h2>
+          <span class="tag tag-accent">Hardware HADES</span>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <span class="metric-label">FPS</span>
+            <span id="metricFps" class="metric-value">0.0</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Bitrate</span>
+            <span id="metricBitrate" class="metric-value">0k</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Velocidad</span>
+            <span id="metricSpeed" class="metric-value">0.0x</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Frames Totales</span>
+            <span id="metricFrames" class="metric-value">0</span>
+          </div>
+        </div>
+
+        <div class="active-stream-info" id="streamInfoBox">
+          <div class="info-row">
+            <span class="info-label">Destino:</span>
+            <span id="infoPlatform" class="info-val">Ninguno</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Formato:</span>
+            <span id="infoMode" class="info-val">Sin transmisión activa</span>
+          </div>
+        </div>
+
+        <!-- Terminal de Logs -->
+        <div class="logs-header">
+          <h3>Registro de Consola (Live Logs)</h3>
+          <button type="button" id="clearLogsBtn" class="btn-mini">Limpiar</button>
+        </div>
+        <div id="logsTerminal" class="logs-terminal">
+          <div class="log-entry log-info">[00:00:00] Sistema Projecto 9x listo para transmitir.</div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Projecto 9x • Motor Autónomo en Servidor HADES • Debian 13</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
