@@ -331,7 +331,10 @@ function syncDonationFormFields() {
 function statusBadgeInfo(status) {
   switch (status) {
     case 'running': return { cls: 'badge-running', label: 'En Vivo' };
+    case 'checking': return { cls: 'badge-starting', label: 'Verificando...' };
     case 'starting': return { cls: 'badge-starting', label: 'Iniciando...' };
+    case 'stopping': return { cls: 'badge-starting', label: 'Deteniendo...' };
+    case 'finished': return { cls: 'badge-idle', label: 'Finalizado' };
     case 'error': return { cls: 'badge-error', label: 'Error' };
     default: return { cls: 'badge-idle', label: 'Detenido' };
   }
@@ -339,11 +342,12 @@ function statusBadgeInfo(status) {
 
 function buildStreamCardHtml(s) {
   const badge = statusBadgeInfo(s.status);
-  const active = s.status === 'running' || s.status === 'starting';
-  const platName = state.presets[s.config.platform]?.name || s.config.platform;
+  const active = ['running', 'starting', 'checking', 'stopping'].includes(s.status);
+  const cfg = s.config || {};
+  const platName = state.presets[cfg.platform]?.name || cfg.platform || 'custom';
   const stats = s.stats || {};
   const isLogsOpen = state.openLogs.has(s.id);
-  const don = s.config.donation || {};
+  const don = cfg.donation || {};
 
   const roomLink = s.tiktokSession?.shareUrl
     ? `<a href="${esc(s.tiktokSession.shareUrl)}" target="_blank" rel="noopener">🔗 Sala TikTok (${esc(s.tiktokSession.roomId || '')})</a>`
@@ -358,16 +362,16 @@ function buildStreamCardHtml(s) {
       <div class="stream-card-head">
         <div class="stream-title-group">
           <span class="slot-id">#${esc(s.id)}</span>
-          <strong>${esc(s.config.accountName || s.config.accountId)}</strong>
-          <span class="tag">${esc(platName)} • ${esc(s.config.quality || '1080p30')}</span>
+          <strong>${esc(cfg.accountName || cfg.accountId || 'Stream')}</strong>
+          <span class="tag">${esc(platName)} • ${esc(cfg.quality || '1080p30')}</span>
         </div>
         <span class="badge ${badge.cls}" data-role="badge"><span class="dot"></span>${esc(badge.label)}</span>
       </div>
 
       <div class="stream-meta">
-        <span>Modo: <strong>${esc(s.config.mode)}</strong> (${esc(stats.encoder || s.config.encoder || 'auto')})</span>
+        <span>Modo: <strong>${esc(cfg.mode || '-')}</strong> (${esc(stats.encoder || cfg.encoder || 'auto')})</span>
         <span>Proxy SEI: <code>:${esc(s.listenPort)}</code></span>
-        <span>Origen: <a href="${esc(s.config.sourceUrl)}" target="_blank" rel="noopener">${esc(s.config.sourceUrl)}</a></span>
+        ${cfg.sourceUrl ? `<span>Origen: <a href="${esc(cfg.sourceUrl)}" target="_blank" rel="noopener">${esc(cfg.sourceUrl)}</a></span>` : ''}
         ${roomLink}
       </div>
 

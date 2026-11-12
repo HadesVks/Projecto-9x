@@ -239,7 +239,18 @@ def _kill_pid_group(pid_file: Path):
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text().strip())
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+            deadline = time.time() + 0.8
+            while time.time() < deadline:
+                try:
+                    os.killpg(pgid, 0)
+                    time.sleep(0.1)
+                except ProcessLookupError:
+                    pgid = None
+                    break
+            if pgid is not None:
+                os.killpg(pgid, signal.SIGKILL)
         except Exception:
             pass
         pid_file.unlink(missing_ok=True)

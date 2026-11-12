@@ -414,7 +414,7 @@ def _persist_cache(key: tuple) -> None:
     existing[_cache_key_str(key)] = {"items": items, "until": until}
     try:
         _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = _CACHE_PATH.with_suffix(".tmp")
+        tmp_path = _CACHE_PATH.with_name(f"{_CACHE_PATH.stem}.{os.getpid()}.tmp")
         with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(existing, fh)
         os.replace(tmp_path, _CACHE_PATH)

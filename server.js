@@ -215,10 +215,25 @@ app.delete('/api/streams/:id', async (req, res) => {
 });
 
 const PORT = process.env.PORT || store.getPort() || 9090;
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
   console.log(` Projecto 9x v2 — Multi-Stream & GPU VAAPI en :${PORT}`);
   console.log(` LAN:       http://10.0.0.3:${PORT}`);
   console.log(` Tailscale: http://100.109.45.25:${PORT}`);
   console.log(`====================================================`);
 });
+
+let shuttingDown = false;
+async function gracefulShutdown(sig) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Server] Señal ${sig} recibida; cerrando streams activos...`);
+  try {
+    await manager.stopAll();
+  } catch {}
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2500);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

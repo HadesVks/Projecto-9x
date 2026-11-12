@@ -270,9 +270,8 @@ export class StreamInstance extends EventEmitter {
 
       const liveStatus = stdout.trim();
       this.addLog('info', `Estado del directo en origen: ${liveStatus}`);
-      if (liveStatus === 'not_live' || liveStatus === 'was_live') {
+      if (['not_live', 'was_live', 'is_upcoming', 'post_live'].includes(liveStatus)) {
         this.status = 'idle';
-        this.emit('status', this.getSummary());
         throw new Error(`El enlace no está transmitiendo en vivo ahora (estado: ${liveStatus}).`);
       }
     } catch (err) {
@@ -622,14 +621,22 @@ export class StreamInstance extends EventEmitter {
 
   async _cleanupTikTokSession() {
     if (!this.accountInfo || this.accountInfo.platform !== 'tiktok') return;
-    try {
-      const args = [TIKTOK_MGR, '--end', '--session-id', this.id];
-      if (this.accountInfo.cookiesAbsPath) {
-        args.push('--cookies', this.accountInfo.cookiesAbsPath);
+    if (this._cleaningUpSession) return this._cleaningUpSession;
+
+    this._cleaningUpSession = (async () => {
+      try {
+        const args = [TIKTOK_MGR, '--end', '--session-id', this.id];
+        if (this.accountInfo.cookiesAbsPath) {
+          args.push('--cookies', this.accountInfo.cookiesAbsPath);
+        }
+        await execFileAsync(PYTHON_BIN, args, { timeout: 10000 });
+        this.tiktokSession = null;
+      } catch {} finally {
+        this._cleaningUpSession = null;
       }
-      await execFileAsync(PYTHON_BIN, args, { timeout: 10000 });
-      this.tiktokSession = null;
-    } catch {}
+    })();
+
+    return this._cleaningUpSession;
   }
 
   _resetStats() {
@@ -775,8 +782,8 @@ export class StreamManager extends EventEmitter {
     // Evitar duplicar exactamente la misma cuenta en 2 streams activos simultáneamente
     for (const s of this.streams.values()) {
       if (
-        s.config?.accountId === account.id &&
-        ['checking', 'starting', 'running'].includes(s.status)
+        (s.config?.accountId === account.id || s.accountInfo?.id === account.id) &&
+        ['checking', 'starting', 'running', 'stopping'].includes(s.status)
       ) {
         throw new Error(`La cuenta "${account.name}" ya está transmitiendo en el slot ${s.id}.`);
       }
@@ -789,21 +796,29 @@ export class StreamManager extends EventEmitter {
       listenPort,
       vaapiSupported: this.vaapiSupported
     });
+    instance.accountInfo = account;
 
     instance.on('status', (summary) => this.emit('stream_status', summary));
     instance.on('stats', (payload) => this.emit('stream_stats', payload));
     instance.on('log', (entry) => this.emit('stream_log', entry));
 
     this.streams.set(id, instance);
-    this.emit('stream_status', instance.getSummary());
 
     try {
       await instance.start(config, account);
     } catch (err) {
-      // Si falló el pre-flight check, mantener el log visible o limpiar si nunca inició
+      try { fs.unlinkSync(instance.donationFilePath); } catch {}
+      this.streams.delete(id);
+      this.emit('stream_removed', { id });
       throw err;
     }
     return instance.getSummary();
+  }
+
+  async stopAll() {
+    await Promise.allSettled(
+      Array.from(this.streams.values()).map((s) => s.stop())
+    );
   }
 
   async stopStream(id) {
@@ -833,8 +848,8 @@ export class StreamManager extends EventEmitter {
   isAccountInUse(accountId) {
     for (const s of this.streams.values()) {
       if (
-        s.config?.accountId === accountId &&
-        ['checking', 'starting', 'running'].includes(s.status)
+        (s.config?.accountId === accountId || s.accountInfo?.id === accountId) &&
+        ['checking', 'starting', 'running', 'stopping'].includes(s.status)
       ) {
         return true;
       }

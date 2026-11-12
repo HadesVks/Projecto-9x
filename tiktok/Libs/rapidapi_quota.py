@@ -116,7 +116,7 @@ def update_from_headers(headers) -> dict:
         snapshot["updated"] = int(time.time())
         with _LOCK:
             QUOTA_PATH.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = QUOTA_PATH.with_suffix(".tmp")
+            tmp_path = QUOTA_PATH.with_name(f"{QUOTA_PATH.stem}.{os.getpid()}.tmp")
             with open(tmp_path, "w", encoding="utf-8") as fh:
                 json.dump(snapshot, fh)
             os.replace(tmp_path, QUOTA_PATH)

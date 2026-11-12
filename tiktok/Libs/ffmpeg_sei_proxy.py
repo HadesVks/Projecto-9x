@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import signal
 import struct
 import subprocess
 import sys
@@ -615,6 +616,11 @@ def _relay_once(args, signer, log):
 
 
 def main():
+    def _handle_term(_signum, _frame):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _handle_term)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--ffmpeg", required=True)
     parser.add_argument("--input-flv", choices=("listen", "pipe"), default="listen")
