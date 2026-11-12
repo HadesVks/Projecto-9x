@@ -519,3 +519,59 @@ body {
   from { opacity: 0.4; }
   to { opacity: 1; }
 }
+
+/* TikTok Special Box */
+.tiktok-box {
+  background: rgba(254, 44, 85, 0.08);
+  border: 1px solid rgba(254, 44, 85, 0.25);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  transition: var(--transition);
+}
+
+.tiktok-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.shield-badge {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #ff4b72;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shield-badge.shield-ok {
+  color: var(--accent-green);
+}
+
+.tiktok-auto-label {
+  font-size: 0.88rem;
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.tiktok-title-group {
+  margin-bottom: 0;
+}
+.tiktok-title-group label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.tiktok-title-group input {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+.link-val {
+  color: var(--accent-cyan) !important;
+  text-decoration: underline;
+  cursor: pointer;
+}

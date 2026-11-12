@@ -1,3 +1,13 @@
 node_modules/
+venv/
 .DS_Store
 *.log
+
+# Sensitive Credentials & Session files
+.env
+tiktok/.env
+tiktok/cookies/tiktok_cookies.json
+tiktok/queue/
+tiktok/logs/
+__pycache__/
+*.pyc

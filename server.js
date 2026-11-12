@@ -99,6 +99,16 @@ app.post('/api/config', (req, res) => {
   res.json({ success: true, message: 'Configuración guardada.' });
 });
 
+// Verificar estado de sesión y cookies de TikTok
+app.get('/api/tiktok/verify', async (req, res) => {
+  try {
+    const result = await engine.verifyTikTokSession();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ valid: false, error: err.message });
+  }
+});
+
 // Estado actual del motor
 app.get('/api/status', (req, res) => {
   res.json({
@@ -110,9 +120,18 @@ app.get('/api/status', (req, res) => {
 // Iniciar Transmisión
 app.post('/api/stream/start', async (req, res) => {
   try {
-    const { sourceUrl, platform, rtmpServer, streamKey, mode, autoReconnect, reconnectDelay } = req.body;
+    const { 
+      sourceUrl, 
+      platform, 
+      rtmpServer, 
+      streamKey, 
+      mode, 
+      autoReconnect, 
+      reconnectDelay,
+      tiktokAutoRoom,
+      tiktokTitle 
+    } = req.body;
 
-    // Actualizar y persistir la última configuración usada
     appConfig.lastConfig = {
       sourceUrl,
       platform,
@@ -120,7 +139,9 @@ app.post('/api/stream/start', async (req, res) => {
       streamKey,
       mode,
       autoReconnect,
-      reconnectDelay
+      reconnectDelay,
+      tiktokAutoRoom: !!tiktokAutoRoom,
+      tiktokTitle: tiktokTitle || ''
     };
     saveConfig(appConfig);
 
@@ -131,7 +152,9 @@ app.post('/api/stream/start', async (req, res) => {
       streamKey,
       mode,
       autoReconnect,
-      reconnectDelay
+      reconnectDelay,
+      tiktokAutoRoom,
+      tiktokTitle
     });
 
     res.json({ success: true, message: 'Transmisión iniciada con éxito.' });

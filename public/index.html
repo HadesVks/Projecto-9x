@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Projecto 9x — Retransmisor En Vivo Multi-Plataforma</title>
+  <title>Projecto 9x — Retransmisor En Vivo Inteligente</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -31,7 +31,7 @@
 
     <!-- Main Content Layout -->
     <main class="dashboard-grid">
-      <!-- Control Panel -->
+      <!-- Panel de Control -->
       <section class="card config-card">
         <div class="card-header">
           <h2>Configuración de la Transmisión</h2>
@@ -39,10 +39,10 @@
         </div>
 
         <form id="streamForm" class="stream-form" onsubmit="return false;">
-          <!-- Origen -->
+          <!-- Enlace de Origen -->
           <div class="form-group">
             <label for="sourceUrl">
-              <span class="icon">📺</span> URL del En Vivo de Origen (YouTube / Twitch / Kick)
+              <span class="icon">📺</span> Enlace del En Vivo de Origen (YouTube / Twitch / Kick)
             </label>
             <input 
               type="url" 
@@ -50,28 +50,28 @@
               placeholder="https://www.youtube.com/watch?v=... o https://youtube.com/live/..." 
               required
             />
-            <small class="hint">Compatible con YouTube Live, Twitch, Kick y más de 1,800 plataformas.</small>
+            <small class="hint">Detección automática de estado en directo y cierre limpio al finalizar.</small>
           </div>
 
-          <!-- Plataforma Destino -->
+          <!-- Selector de Plataforma -->
           <div class="form-row">
             <div class="form-group col-half">
               <label for="platformSelect">
                 <span class="icon">🎯</span> Plataforma Destino
               </label>
               <select id="platformSelect">
-                <option value="tiktok">TikTok Live</option>
-                <option value="kick">Kick</option>
+                <option value="tiktok">TikTok Live (Con Proxy SEI)</option>
                 <option value="youtube">YouTube Live</option>
+                <option value="kick">Kick</option>
                 <option value="twitch">Twitch</option>
                 <option value="facebook">Facebook Live</option>
                 <option value="custom">Personalizado (RTMP/RTMPS)</option>
               </select>
             </div>
 
-            <div class="form-group col-half">
+            <div class="form-group col-half" id="rtmpServerGroup">
               <label for="rtmpServer">
-                <span class="icon">🌐</span> Servidor RTMP / URL de Emisión
+                <span class="icon">🌐</span> Servidor RTMP Destino
               </label>
               <input 
                 type="text" 
@@ -82,8 +82,29 @@
             </div>
           </div>
 
-          <!-- Clave de Transmisión -->
-          <div class="form-group">
+          <!-- Caja Especial TikTok (Detección de Cookies / SEI) -->
+          <div id="tiktokSpecialBox" class="tiktok-box">
+            <div class="tiktok-box-header">
+              <div class="tiktok-status">
+                <span id="tiktokShield" class="shield-badge">🛡️ Sesión TikTok: Verificando...</span>
+              </div>
+              <button type="button" id="checkTikTokBtn" class="btn-mini">Comprobar</button>
+            </div>
+
+            <label class="checkbox-container tiktok-auto-label">
+              <input type="checkbox" id="tiktokAutoRoom" checked />
+              <span class="checkmark"></span>
+              <strong>Crear Sala Automática en TikTok con Proxy SEI Anti-Baneo</strong>
+            </label>
+
+            <div class="form-group tiktok-title-group" id="tiktokTitleGroup">
+              <label for="tiktokTitle">Título del En Vivo en TikTok:</label>
+              <input type="text" id="tiktokTitle" placeholder="⚡ Transmisión en Vivo 24/7 | Projecto 9x" />
+            </div>
+          </div>
+
+          <!-- Clave de Transmisión (Stream Key) -->
+          <div class="form-group" id="streamKeyGroup">
             <label for="streamKey">
               <span class="icon">🔑</span> Clave de Transmisión (Stream Key)
             </label>
@@ -91,12 +112,11 @@
               <input 
                 type="password" 
                 id="streamKey" 
-                placeholder="Pega aquí tu Stream Key de TikTok o destino..." 
-                required
+                placeholder="Pega aquí tu Stream Key de destino..." 
               />
               <button type="button" id="toggleKeyBtn" class="toggle-btn" title="Mostrar/Ocultar clave">👁️</button>
             </div>
-            <small class="hint">Generada en TikTok Live Studio, Live Center o el panel de tu plataforma.</small>
+            <small class="hint" id="streamKeyHint">Generada en TikTok Live Studio o en el panel de tu plataforma.</small>
           </div>
 
           <!-- Modo de Video -->
@@ -106,8 +126,8 @@
               <label class="mode-card active">
                 <input type="radio" name="videoMode" value="vertical_blur" checked />
                 <div class="mode-content">
-                  <div class="mode-title">📱 Vertical 9:16 (Fondo Blur)</div>
-                  <div class="mode-desc">Video 16:9 centrado nítido con fondo desenfocado. Ideal para TikTok.</div>
+                  <div class="mode-title">📱 Vertical 9:16 (Fondo Blur Profesional)</div>
+                  <div class="mode-desc">Video 16:9 centrado nítido con fondo desenfocado dinámico. Formato óptimo para TikTok.</div>
                 </div>
               </label>
 
@@ -115,7 +135,7 @@
                 <input type="radio" name="videoMode" value="vertical_crop" />
                 <div class="mode-content">
                   <div class="mode-title">📱 Vertical 9:16 (Recorte Centrado)</div>
-                  <div class="mode-desc">Recorta el centro de la transmisión en 9:16 directo.</div>
+                  <div class="mode-desc">Recorta el centro de la transmisión a 9:16 completo sin barras ni bordes.</div>
                 </div>
               </label>
 
@@ -123,18 +143,18 @@
                 <input type="radio" name="videoMode" value="copy" />
                 <div class="mode-content">
                   <div class="mode-title">🖥️ Copia Directa 16:9 (Passthrough)</div>
-                  <div class="mode-desc">Transmisión original sin recodificar. Cero consumo de CPU.</div>
+                  <div class="mode-desc">Transmisión original sin recodificar. Cero consumo de CPU/GPU. Ideal para YouTube o Kick.</div>
                 </div>
               </label>
             </div>
           </div>
 
-          <!-- Opciones adicionales -->
+          <!-- Opciones de Reconexión -->
           <div class="form-row options-row">
             <label class="checkbox-container">
               <input type="checkbox" id="autoReconnect" checked />
               <span class="checkmark"></span>
-              Reconexión Automática si se corta el en vivo
+              Reconexión Automática anti-caídas de red
             </label>
 
             <div class="reconnect-delay-box">
@@ -168,7 +188,7 @@
             <span id="metricFps" class="metric-value">0.0</span>
           </div>
           <div class="metric-box">
-            <span class="metric-label">Bitrate</span>
+            <span class="metric-label">Bitrate (CBR)</span>
             <span id="metricBitrate" class="metric-value">0k</span>
           </div>
           <div class="metric-box">
@@ -183,12 +203,16 @@
 
         <div class="active-stream-info" id="streamInfoBox">
           <div class="info-row">
-            <span class="info-label">Destino:</span>
-            <span id="infoPlatform" class="info-val">Ninguno</span>
+            <span class="info-label">Plataforma Destino:</span>
+            <span id="infoPlatform" class="info-val">Ninguna</span>
           </div>
           <div class="info-row">
-            <span class="info-label">Formato:</span>
-            <span id="infoMode" class="info-val">Sin transmisión activa</span>
+            <span class="info-label">Formato de Video:</span>
+            <span id="infoMode" class="info-val">Sin emisión</span>
+          </div>
+          <div class="info-row" id="shareUrlRow" style="display: none;">
+            <span class="info-label">Enlace de la Sala:</span>
+            <a id="infoShareLink" href="#" target="_blank" class="info-val link-val">Ver en TikTok &nearr;</a>
           </div>
         </div>
 
@@ -204,7 +228,7 @@
     </main>
 
     <footer class="footer">
-      <p>Projecto 9x • Motor Autónomo en Servidor HADES • Debian 13</p>
+      <p>Projecto 9x • Motor Autónomo Desarrollado con Inteligencia Artificial • Debian 13 HADES</p>
     </footer>
   </div>
 
