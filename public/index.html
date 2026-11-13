@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Projecto 9x — Multi-Stream En Vivo &amp; Donaciones</title>
+  <title>Projecto 9x v2.5 — Multi-Stream &amp; Auto-Restreamer</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,27 +14,29 @@
         <div class="logo-badge">9X</div>
         <div class="brand-text">
           <h1>Projecto 9x</h1>
-          <p>Multi-Stream En Vivo • GPU VAAPI • Proxy SEI Anti-Baneo</p>
+          <p>Multi-Stream En Vivo • GPU VAAPI • Auto-Restreamer 24/7</p>
         </div>
       </div>
 
       <div class="system-pills">
         <div id="vaapiPill" class="sys-pill">⚡ GPU: Comprobando...</div>
         <div id="activeStreamsPill" class="sys-pill">📡 0 en vivo</div>
+        <div id="quotaPill" class="sys-pill" style="display: none;">🔑 SEI: --/--</div>
         <div id="sysResourcesPill" class="sys-pill">CPU --% • RAM --/-- GB</div>
+        <button type="button" id="pinBtn" class="sys-pill sys-pill-btn">🔓 PIN</button>
       </div>
     </header>
 
     <!-- Navigation Tabs -->
     <nav class="nav-tabs">
       <button type="button" class="tab-btn active" data-tab="streams">📡 Transmisiones Simultáneas</button>
+      <button type="button" class="tab-btn" data-tab="monitors">🤖 Auto-Restreamer 24/7 (<span id="monitorsCount">0</span>)</button>
       <button type="button" class="tab-btn" data-tab="accounts">👥 Cuentas de Emisión (<span id="accountsCount">0</span>)</button>
     </nav>
 
     <!-- TAB 1: STREAMS -->
     <section id="tab-streams" class="tab-panel active">
       <div class="dashboard-grid">
-        <!-- Nuevo Stream -->
         <section class="card config-card">
           <div class="card-header">
             <h2>Lanzar Nuevo En Vivo</h2>
@@ -58,9 +60,17 @@
               />
             </div>
 
-            <div class="form-group" id="tiktokTitleGroup">
-              <label for="tiktokTitle">📝 Título de la Sala en TikTok</label>
-              <input type="text" id="tiktokTitle" placeholder="⚡ En Vivo 24/7 | Apoya el Canal" />
+            <div id="tiktokTitleGroup">
+              <div class="form-row">
+                <div class="form-group col-half">
+                  <label for="tiktokTitle">📝 Título de Sala TikTok</label>
+                  <input type="text" id="tiktokTitle" placeholder="⚡ En Vivo 24/7 | Apoya el Canal" />
+                </div>
+                <div class="form-group col-half">
+                  <label for="tiktokTopic">🎮 Categoría TikTok</label>
+                  <select id="tiktokTopic"></select>
+                </div>
+              </div>
             </div>
 
             <div class="form-row">
@@ -94,13 +104,13 @@
 
               <div id="donSettingsArea" class="don-settings">
                 <div class="form-group">
-                  <label for="donText">Mensaje que aparecerá en el video:</label>
+                  <label for="donText">Mensaje en pantalla (usa <code>|</code> para rotar varios):</label>
                   <input
                     type="text"
                     id="donText"
-                    placeholder="Apoya el directo ★ Donaciones: paypal.me/tuusuario"
+                    placeholder="Apoya: paypal.me/tuusuario | ¡Dale Tap Tap y Síguenos!"
                   />
-                  <small class="hint">Puedes editar este texto en vivo sin cortar el stream.</small>
+                  <small class="hint">Puedes editar o pausar este banner en vivo sin cortar el stream.</small>
                 </div>
 
                 <div class="form-row">
@@ -113,11 +123,22 @@
                     </select>
                   </div>
                   <div class="form-group col-half">
+                    <label for="donStyle">Estilo Visual</label>
+                    <select id="donStyle"></select>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group col-half">
                     <label for="donDisplayMode">Frecuencia</label>
                     <select id="donDisplayMode">
                       <option value="periodic">Periódico (Recomendado)</option>
                       <option value="always">Fijo (Siempre visible)</option>
                     </select>
+                  </div>
+                  <div class="form-group col-half">
+                    <label for="donRotateSec">Rotar cada (seg si hay |):</label>
+                    <input type="number" id="donRotateSec" value="25" min="12" max="600" />
                   </div>
                 </div>
 
@@ -138,10 +159,10 @@
             <div class="form-row options-row">
               <label class="checkbox-container">
                 <input type="checkbox" id="autoReconnect" checked />
-                <span>Reconexión Automática anti-caídas</span>
+                <span>Reconexión Automática con Backoff</span>
               </label>
               <div class="reconnect-delay-box">
-                <label for="reconnectDelay">Espera (s):</label>
+                <label for="reconnectDelay">Base (s):</label>
                 <input type="number" id="reconnectDelay" value="5" min="2" max="60" />
               </div>
             </div>
@@ -152,25 +173,132 @@
           </form>
         </section>
 
-        <!-- Lista de Transmisiones Simultáneas -->
         <section class="streams-column">
           <div class="section-title-bar">
             <h2>Monitor de Transmisiones</h2>
-            <span class="hint">Cada slot corre aislado con su propio puerto Proxy SEI y métricas</span>
+            <span class="hint">Cada slot corre aislado con watchdog anti-congelamiento, Proxy SEI y VAAPI</span>
           </div>
           <div id="streamsContainer" class="streams-list">
             <div class="empty-state">
-              No hay transmisiones activas. Selecciona una cuenta y pega un enlace de YouTube para comenzar.
+              No hay transmisiones activas. Selecciona una cuenta y pega un enlace en vivo para comenzar.
             </div>
           </div>
         </section>
       </div>
     </section>
 
-    <!-- TAB 2: MULTI-CUENTA -->
+    <!-- TAB 2: AUTO-RESTREAMER 24/7 -->
+    <section id="tab-monitors" class="tab-panel">
+      <div class="dashboard-grid">
+        <section class="card">
+          <div class="card-header">
+            <h2>Vigilar Canal 24/7</h2>
+            <span class="tag tag-accent">Automático</span>
+          </div>
+
+          <form id="monitorForm" class="stream-form" onsubmit="return false;">
+            <div class="form-group">
+              <label for="monName">🏷️ Nombre de la Regla</label>
+              <input type="text" id="monName" placeholder="Ej: Torneo Valorant 24/7" required />
+            </div>
+
+            <div class="form-group">
+              <label for="monChannelUrl">📺 URL del Canal en Directo (/live)</label>
+              <input
+                type="url"
+                id="monChannelUrl"
+                placeholder="https://www.youtube.com/@canal/live o twitch.tv/..."
+                required
+              />
+              <small class="hint">En cuanto el canal prenda directo, iniciará el stream automáticamente.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="monAccountSelect">👤 Cuenta Destino</label>
+              <select id="monAccountSelect" required></select>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-half">
+                <label for="monTitle">📝 Título en TikTok ({title} = título real)</label>
+                <input type="text" id="monTitle" value="{title}" />
+              </div>
+              <div class="form-group col-half">
+                <label for="monTopic">🎮 Categoría TikTok</label>
+                <select id="monTopic"></select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col-half">
+                <label for="monMode">📐 Formato</label>
+                <select id="monMode">
+                  <option value="vertical_blur">📱 Vertical 9:16 (Blur Rápido)</option>
+                  <option value="vertical_crop">📱 Vertical 9:16 (Recorte)</option>
+                  <option value="copy">🖥️ Horizontal 16:9 / Copia</option>
+                </select>
+              </div>
+              <div class="form-group col-half">
+                <label for="monQuality">🎞️ Calidad</label>
+                <select id="monQuality">
+                  <option value="720p30" selected>720p 30fps (Ideal 24/7)</option>
+                  <option value="1080p30">1080p 30fps (Alta Calidad)</option>
+                  <option value="1080p60">1080p 60fps</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="monIntervalSec">⏱️ Intervalo de revisión (segundos, mín. 30s)</label>
+              <input type="number" id="monIntervalSec" value="60" min="30" max="600" />
+            </div>
+
+            <div class="donation-box">
+              <div class="donation-header">
+                <label class="checkbox-container">
+                  <input type="checkbox" id="monDonEnabled" checked />
+                  <span>💖 <strong>Incluir Banner de Donación</strong></span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label for="monDonText">Mensaje (soporta rotación con |):</label>
+                <input type="text" id="monDonText" placeholder="Apoya el directo ★ paypal.me/tuusuario" />
+              </div>
+              <div class="form-row">
+                <div class="form-group col-half">
+                  <label for="monDonPosition">Posición</label>
+                  <select id="monDonPosition">
+                    <option value="bottom">Abajo</option>
+                    <option value="center_bottom">Centro-Bajo</option>
+                    <option value="top">Arriba</option>
+                  </select>
+                </div>
+                <div class="form-group col-half">
+                  <label for="monDonStyle">Estilo</label>
+                  <select id="monDonStyle"></select>
+                </div>
+              </div>
+            </div>
+
+            <button type="button" id="saveMonitorBtn" class="btn btn-primary">
+              🤖 Activar Monitor 24/7
+            </button>
+          </form>
+        </section>
+
+        <section class="streams-column">
+          <div class="section-title-bar">
+            <h2>Canales Vigilados</h2>
+            <span class="hint">Inicia y detiene la retransmisión automáticamente sin consumir cuota RapidAPI mientras están offline</span>
+          </div>
+          <div id="monitorsContainer" class="monitors-list"></div>
+        </section>
+      </div>
+    </section>
+
+    <!-- TAB 3: MULTI-CUENTA -->
     <section id="tab-accounts" class="tab-panel">
       <div class="dashboard-grid">
-        <!-- Agregar Cuenta -->
         <section class="card">
           <div class="card-header">
             <h2>Agregar Nueva Cuenta</h2>
@@ -231,11 +359,10 @@
           </form>
         </section>
 
-        <!-- Lista de Cuentas Guardadas -->
         <section class="streams-column">
           <div class="section-title-bar">
             <h2>Cuentas Configuradas</h2>
-            <span class="hint">Puedes verificar el estado LIVE de cada cuenta TikTok antes de emitir</span>
+            <span class="hint">Puedes verificar o actualizar cookies/claves de cada cuenta sin perder su configuración</span>
           </div>
           <div id="accountsContainer" class="accounts-list"></div>
         </section>
@@ -243,8 +370,39 @@
     </section>
 
     <footer class="footer">
-      <p>Projecto 9x v2 • Desarrollado con Inteligencia Artificial • Aceleración Hardware Intel VAAPI</p>
+      <p>Projecto 9x v2.5 • Desarrollado con Inteligencia Artificial • Decode/Encode Hardware Intel VAAPI</p>
     </footer>
+  </div>
+
+  <!-- Modal Bloqueo por PIN -->
+  <div id="pinLockModal" class="pin-modal-backdrop">
+    <div class="pin-modal-card">
+      <h2>🔒 Acceso Protegido — Projecto 9x</h2>
+      <p class="hint">Ingresa tu PIN para controlar transmisiones y cuentas.</p>
+      <div class="form-group">
+        <input type="password" id="pinUnlockInput" placeholder="PIN de acceso..." />
+      </div>
+      <div id="pinUnlockError" class="error-text" style="display: none;"></div>
+      <button type="button" id="pinUnlockBtn" class="btn btn-primary">Desbloquear Panel</button>
+    </div>
+  </div>
+
+  <!-- Modal Configuración de PIN -->
+  <div id="pinConfigModal" class="pin-modal-backdrop">
+    <div class="pin-modal-card">
+      <h2>🔐 Seguridad del Panel (PIN)</h2>
+      <p class="hint">Protege el acceso en red local. Mínimo 4 caracteres. Déjalo vacío al pulsar Desactivar para quitarlo.</p>
+      <div class="form-group">
+        <label for="pinConfigInput">Nuevo PIN</label>
+        <input type="password" id="pinConfigInput" placeholder="Mínimo 4 caracteres..." />
+      </div>
+      <div class="pin-modal-actions">
+        <button type="button" id="pinSaveBtn" class="btn btn-sm btn-accent-sm">💾 Guardar PIN</button>
+        <button type="button" id="pinDisableBtn" class="btn btn-sm btn-danger-sm">🔓 Quitar PIN</button>
+        <button type="button" id="pinLogoutBtn" class="btn btn-sm btn-neutral-sm" style="display: none;">🚪 Cerrar Sesión</button>
+        <button type="button" id="pinCloseModalBtn" class="btn btn-sm btn-neutral-sm">Cancelar</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

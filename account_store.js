@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -25,12 +26,18 @@ const DEFAULT_PRESETS = {
 
 const DEFAULT_DONATION = {
   enabled: true,
-  text: 'Apoya el directo ★ Donaciones: paypal.me/tuusuario',
+  text: 'Apoya el directo ★ Donaciones: paypal.me/tuusuario | ¡Dale Tap Tap y Síguenos!',
   position: 'bottom',       // 'bottom' | 'center_bottom' | 'top'
   displayMode: 'periodic',  // 'always' | 'periodic'
+  style: 'dark',            // 'dark' | 'tiktok' | 'gold' | 'alert'
   intervalSec: 180,
-  durationSec: 25
+  durationSec: 25,
+  rotateSec: 25
 };
+
+function hashPin(pin, salt) {
+  return crypto.scryptSync(String(pin), salt, 32).toString('hex');
+}
 
 function maskKey(key) {
   if (!key) return '';
@@ -59,6 +66,13 @@ export class AccountStore {
       port: parsed.port || 9090,
       savedPresets: parsed.savedPresets || DEFAULT_PRESETS,
       accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
+      autoMonitors: Array.isArray(parsed.autoMonitors) ? parsed.autoMonitors : [],
+      legacyMigrated: Boolean(parsed.legacyMigrated),
+      security: {
+        pinSalt: parsed.security?.pinSalt || '',
+        pinHash: parsed.security?.pinHash || '',
+        sessionSecret: parsed.security?.sessionSecret || crypto.randomBytes(32).toString('hex')
+      },
       donationDefaults: { ...DEFAULT_DONATION, ...(parsed.donationDefaults || {}) },
       lastConfig: parsed.lastConfig || {}
     };
@@ -71,7 +85,7 @@ export class AccountStore {
   }
 
   _migrateLegacyTikTok() {
-    if (this.data.accounts.length === 0 && fs.existsSync(LEGACY_COOKIES)) {
+    if (!this.data.legacyMigrated && this.data.accounts.length === 0 && fs.existsSync(LEGACY_COOKIES)) {
       const id = 'acc-tiktok-principal';
       const accDir = path.join(ACCOUNTS_DIR, id);
       fs.mkdirSync(accDir, { recursive: true });
@@ -91,6 +105,7 @@ export class AccountStore {
         statusText: 'Ready',
         createdAt: new Date().toISOString()
       });
+      this.data.legacyMigrated = true;
       this._save();
     }
   }
@@ -200,6 +215,46 @@ export class AccountStore {
     return this.listAccountsSafe().find((a) => a.id === id);
   }
 
+  updateAccount(id, { name, rtmpServer, streamKey, cookiesJson }) {
+    const acc = this.data.accounts.find((a) => a.id === id);
+    if (!acc) throw new Error('Cuenta no encontrada.');
+
+    if (name && name.trim()) {
+      acc.name = name.trim();
+    }
+
+    if (acc.platform === 'tiktok' && acc.authType === 'cookies') {
+      if (cookiesJson && cookiesJson.trim()) {
+        let parsedCookies;
+        try {
+          parsedCookies = JSON.parse(cookiesJson);
+        } catch {
+          throw new Error('El texto de cookies no es un JSON válido.');
+        }
+        if (!Array.isArray(parsedCookies) && typeof parsedCookies !== 'object') {
+          throw new Error('Formato de cookies TikTok inválido.');
+        }
+        const accDir = path.join(ACCOUNTS_DIR, acc.id);
+        fs.mkdirSync(accDir, { recursive: true });
+        const cookiesAbs = path.join(accDir, 'cookies.json');
+        fs.writeFileSync(cookiesAbs, JSON.stringify(parsedCookies, null, 2), 'utf-8');
+        acc.cookiesFile = path.relative(__dirname, cookiesAbs);
+        acc.verified = false;
+        acc.statusText = 'Sin verificar';
+      }
+    } else {
+      if (rtmpServer !== undefined && rtmpServer.trim()) {
+        acc.rtmpServer = rtmpServer.trim();
+      }
+      if (streamKey && streamKey.trim()) {
+        acc.streamKey = streamKey.trim();
+      }
+    }
+
+    this._save();
+    return this.listAccountsSafe().find((a) => a.id === id);
+  }
+
   deleteAccount(id) {
     const idx = this.data.accounts.findIndex((a) => a.id === id);
     if (idx === -1) throw new Error('Cuenta no encontrada.');
@@ -210,6 +265,112 @@ export class AccountStore {
         fs.rmSync(accDir, { recursive: true, force: true });
       }
     }
+    this.data.legacyMigrated = true;
+    this._save();
+    return { deleted: true, id };
+  }
+
+  // --- Seguridad PIN Opcional ---
+  getSessionSecret() {
+    if (!this.data.security?.sessionSecret) {
+      this.data.security = {
+        ...(this.data.security || {}),
+        sessionSecret: crypto.randomBytes(32).toString('hex')
+      };
+      this._save();
+    }
+    return this.data.security.sessionSecret;
+  }
+
+  hasAdminPin() {
+    if (process.env.ADMIN_PIN && process.env.ADMIN_PIN.trim()) return true;
+    return Boolean(this.data.security?.pinHash);
+  }
+
+  verifyAdminPin(pin) {
+    const candidate = String(pin ?? '').trim();
+    if (!candidate) return false;
+    const envPin = (process.env.ADMIN_PIN || '').trim();
+    if (envPin) {
+      const a = Buffer.from(candidate, 'utf-8');
+      const b = Buffer.from(envPin, 'utf-8');
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    }
+    const { pinSalt, pinHash } = this.data.security || {};
+    if (!pinSalt || !pinHash) return true;
+    const a = Buffer.from(hashPin(candidate, pinSalt), 'hex');
+    const b = Buffer.from(pinHash, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+
+  setAdminPin(newPin) {
+    if (process.env.ADMIN_PIN && process.env.ADMIN_PIN.trim()) {
+      throw new Error('El PIN está bloqueado por variable de entorno ADMIN_PIN.');
+    }
+    const clean = String(newPin ?? '').trim();
+    if (!clean) {
+      this.data.security.pinSalt = '';
+      this.data.security.pinHash = '';
+      this._save();
+      return { enabled: false };
+    }
+    if (clean.length < 4) {
+      throw new Error('El PIN debe tener al menos 4 caracteres.');
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    this.data.security.pinSalt = salt;
+    this.data.security.pinHash = hashPin(clean, salt);
+    this._save();
+    return { enabled: true };
+  }
+
+  // --- Auto-Monitores 24/7 ---
+  listMonitors() {
+    return this.data.autoMonitors;
+  }
+
+  createMonitor(payload) {
+    const name = (payload.name || '').trim();
+    const channelUrl = (payload.channelUrl || '').trim();
+    const accountId = (payload.accountId || '').trim();
+    if (!name) throw new Error('Nombre del monitor obligatorio.');
+    if (!channelUrl) throw new Error('URL del canal o /live obligatoria.');
+    if (!accountId || !this.getAccountRaw(accountId)) {
+      throw new Error('Cuenta destino no válida.');
+    }
+
+    const mon = {
+      id: `mon-${Date.now().toString(36)}`,
+      name,
+      channelUrl,
+      accountId,
+      mode: payload.mode || 'vertical_blur',
+      quality: payload.quality || '720p30',
+      topicId: String(payload.topicId || '5').trim() || '5',
+      tiktokTitle: (payload.tiktokTitle || '{title}').trim(),
+      checkIntervalSec: Math.max(30, Math.min(600, Number(payload.checkIntervalSec) || 60)),
+      donation: { ...DEFAULT_DONATION, ...(payload.donation || {}) },
+      enabled: payload.enabled !== false,
+      lastTriggeredVideoId: '',
+      createdAt: new Date().toISOString()
+    };
+    this.data.autoMonitors.push(mon);
+    this._save();
+    return mon;
+  }
+
+  updateMonitor(id, updates) {
+    const mon = this.data.autoMonitors.find((m) => m.id === id);
+    if (!mon) throw new Error('Monitor no encontrado.');
+    Object.assign(mon, updates);
+    this._save();
+    return mon;
+  }
+
+  deleteMonitor(id) {
+    const idx = this.data.autoMonitors.findIndex((m) => m.id === id);
+    if (idx === -1) throw new Error('Monitor no encontrado.');
+    this.data.autoMonitors.splice(idx, 1);
     this._save();
     return { deleted: true, id };
   }

@@ -1,7 +1,7 @@
 <div align="center">
 
-# ⚡ Projecto 9x — Multi-Stream Live Restreamer & Donation Engine
-### Motor Inteligente de Retransmisión Simultánea Multi-Cuenta con Aceleración GPU VAAPI
+# ⚡ Projecto 9x — Multi-Stream Live Restreamer & Auto-Restreamer 24/7
+### Motor Inteligente de Retransmisión Simultánea Multi-Cuenta con GPU Intel VAAPI
 
 [![Node.js](https://img.shields.io/badge/Node.js-v22-green.svg)](https://nodejs.org/)
 [![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
@@ -9,7 +9,7 @@
 [![AI-Powered](https://img.shields.io/badge/Developed%20with-Artificial%20Intelligence-purple.svg)](#-desarrollado-con-inteligencia-artificial)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 
-*Sistema autónomo multi-cuenta para capturar múltiples directos simultáneamente (YouTube Live, Twitch, Kick) y retransmitirlos con codificación hardware Intel VAAPI, banners de donación editables en vivo, proxy SEI anti-baneo en TikTok y auto-detección de fin de emisión.*
+*Sistema autónomo multi-cuenta (v2.5) para capturar múltiples directos simultáneamente (YouTube Live, Twitch, Kick) —manualmente o mediante vigilancia 24/7— y retransmitirlos con decodificación y codificación hardware Intel VAAPI, banners de donación con estilos y rotación en vivo, proxy SEI anti-baneo en TikTok, bloqueo opcional por PIN y auto-detección de fin de emisión.*
 
 ---
 
@@ -17,19 +17,20 @@
 
 ## 🤖 Desarrollado con Inteligencia Artificial
 
-> **Nota de autoría**: Este proyecto ha sido **completamente diseñado, programado y optimizado por Inteligencia Artificial (Antigravity AI Agent)**. Desde el motor concurrente multi-slot (`StreamManager`) y el almacén aislado de cuentas (`AccountStore`), hasta la codificación por hardware VAAPI con blur optimizado y el proxy SEI firmado por sesión, toda la arquitectura fue construida mediante ingeniería de software asistida por IA.
+> **Nota de autoría**: Este proyecto ha sido **completamente diseñado, programado y optimizado por Inteligencia Artificial (Antigravity AI Agent)**. Desde el motor concurrente multi-slot (`StreamManager`), el vigilante automático 24/7 (`ChannelMonitor`) y el almacén aislado de cuentas (`AccountStore`), hasta el pipeline VAAPI completo, los overlays dinámicos con pausa en vivo y el proxy SEI firmado por sesión, toda la arquitectura fue construida mediante ingeniería de software asistida por IA.
 
 ---
 
 ## 🌟 Características Principales
 
-- **👥 Gestión Multi-Cuenta Real:** Registra y verifica múltiples cuentas destino (**TikTok Live** con Cookies JSON independientes o RTMP manual, **YouTube Live**, **Kick**, **Twitch**, **Facebook Live** o servidores **RTMP/RTMPS** personalizados).
-- **📡 Multi-Stream Simultáneo Aislado:** Ejecuta múltiples transmisiones distintas al mismo tiempo (`Slot #stream-1`, `#stream-2`, ...). Cada directo opera en su propio puerto de Proxy SEI (`19350–19449`), carpeta aislada de sesión/cola y limpieza segura por árbol de procesos.
-- **⚡ Aceleración Hardware Intel VAAPI + Blur Rápido:** Descarga la codificación H.264 al chip gráfico (`h264_vaapi` en `/dev/dri/renderD128`) con respaldo automático a `libx264`. El modo Vertical Blur procesa el desenfoque sobre un lienzo reducido (`180x320`, reduciendo drásticamente la carga de CPU) antes de reescalar a `720p30`, `1080p30` o `1080p60`.
-- **💖 Sistema de Donaciones Visuales en Vivo:** Overlay nativo mediante `drawtext` con lectura dinámica (`textfile` + `reload=30`), ajuste automático de línea y modo **Periódico** (aparece cada *N* segundos durante *X* segundos) o **Fijo**, sin alterar el audio del directo. Permite actualizar el mensaje de donación desde el panel web sin reiniciar el stream.
-- **🛡️ Evasión Anti-Bot y Proxy SEI Anti-Baneo:** Ingesta mediante `yt-dlp` calibrado (`player_client=ios,android,tv,mweb`), limpieza de paquetes SEI previos y firma de paquetes **SEI NALU tipo 100** mediante `ffmpeg_sei_proxy.py` por cada instancia de TikTok Live.
-- **🏁 Auto-Detección de Fin y Reconexión Anti-Caídas:** Reconoce `#EXT-X-ENDLIST` al finalizar la transmisión origen para cerrar la sala limpiamente, o reconecta de forma controlada si se habilita.
-- **🖥️ Panel Web Reactivo con Telemetría en Tiempo Real:** Monitor por SSE (`/api/stream/events`) con métricas por transmisión (FPS, Bitrate, Velocidad, Uptime, enlace a Sala TikTok, visor de logs individual) y telemetría del servidor (GPU VAAPI, CPU %, RAM y temperatura).
+- **👥 Gestión Multi-Cuenta Real (con Edición Inline):** Registra, edita y verifica múltiples cuentas destino (**TikTok Live** con Cookies JSON independientes o RTMP manual, **YouTube Live**, **Kick**, **Twitch**, **Facebook Live** o servidores **RTMP/RTMPS** personalizados) y selecciona la categoría/tema de sala TikTok (`topicId`).
+- **🤖 Auto-Restreamer 24/7 (`ChannelMonitor`):** Vigila canales (`/live`) en el intervalo configurado, detecta automáticamente cuando el creador entra en directo y lanza el slot con sustitución dinámica de `{title}` y limpieza automática al terminar.
+- **📡 Multi-Stream Simultáneo Aislado + Relanzamiento:** Ejecuta múltiples transmisiones distintas al mismo tiempo (`#live-1`, `#live-2`, ...). Cada directo opera en su propio puerto de Proxy SEI verificado por TCP (`19350–19449`), carpeta aislada de cola, prevención de sesiones huérfanas al arranque (`--cleanup-stale`) y botón de **Relanzar** sobre slots finalizados/detenidos.
+- **⚡ Pipeline Intel VAAPI Completo (`-hwaccel vaapi` + Blur Rápido):** Decodifica y codifica H.264 directamente en la GPU Intel (`/dev/dri/renderD128`) con respaldo automático a `libx264` y límite inteligente de resolución (`yt-dlp` hasta `720p`/`1080p` evitando streams pesados 4K/AV1). El modo Vertical Blur procesa el desenfoque en lienzo reducido (`180x320`) antes de escalar a `720p30`, `1080p30` o `1080p60`.
+- **💖 Sistema de Donaciones v2.5 en Vivo:** Overlay nativo mediante `drawtext` con 4 estilos visuales (**Oscuro**, **Neón TikTok**, **Dorado VIP**, **Alerta Roja**), rotación automática de múltiples mensajes separados por `|` (`rotateSec`), modo **Periódico** o **Fijo**, edición de texto instantánea y **Pausa/Reanudación en vivo** sin reiniciar FFmpeg.
+- **🛡️ Evasión Anti-Bot, Watchdog y Proxy SEI Anti-Baneo:** Ingesta mediante `yt-dlp` calibrado (`player_client=ios,android,tv,mweb`), limpieza de paquetes SEI previos, firma **SEI NALU tipo 100** en `ffmpeg_sei_proxy.py`, heartbeat auto-terminable si cae el proxy o cierra la sala, y watchdog anti-congelamiento (45s).
+- **🏁 Auto-Detección de Fin y Reconexión Inteligente:** Reconoce `#EXT-X-ENDLIST` al terminar el stream origen, o reconecta con backoff exponencial (máximo 5 intentos iniciales) verificando antes con `yt-dlp` si el directo sigue activo.
+- **🖥️ Telemetría Real, Cuota API y Seguridad PIN:** Panel por SSE (`/api/stream/events`) con CPU % real (`/proc/stat`), RAM, temperatura, cuota RapidAPI de costo 0 (`rapidapi_quota.json`) y bloqueo opcional con **PIN** (`scrypt` + cookie firmada `HttpOnly`, o variable `ADMIN_PIN`).
 
 ---
 

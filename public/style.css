@@ -118,6 +118,28 @@ body {
   color: var(--accent-cyan);
 }
 
+.sys-pill.pill-warn {
+  border-color: rgba(255, 179, 0, 0.4);
+  background: rgba(255, 179, 0, 0.12);
+  color: var(--accent-yellow);
+}
+
+.sys-pill.pill-danger {
+  border-color: rgba(255, 51, 102, 0.4);
+  background: rgba(255, 51, 102, 0.14);
+  color: var(--accent-red);
+}
+
+.sys-pill-btn {
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.sys-pill-btn:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
 /* Navigation Tabs */
 .nav-tabs {
   display: flex;
@@ -614,6 +636,82 @@ button:disabled {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.account-edit-drawer {
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.account-edit-drawer.open {
+  display: flex;
+}
+
+.monitors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.monitor-card {
+  background: var(--bg-card);
+  border: 1px solid var(--bg-card-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pin-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 8, 15, 0.86);
+  backdrop-filter: blur(8px);
+  z-index: 9000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.pin-modal-backdrop.open {
+  display: flex;
+}
+
+.pin-modal-card {
+  width: 100%;
+  max-width: 390px;
+  background: #0d1424;
+  border: 1px solid var(--bg-card-border);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+}
+
+.pin-modal-card h2 {
+  font-size: 1.15rem;
+}
+
+.pin-modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.error-text {
+  color: var(--accent-red);
+  font-size: 0.84rem;
+  font-weight: 600;
 }
 
 .footer {

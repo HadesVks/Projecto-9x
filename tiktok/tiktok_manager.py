@@ -224,15 +224,91 @@ def create_live_room(
     return session_data
 
 
-def run_heartbeat_loop(room_id, stream_id, cookies_path=None):
-    """Ciclo continuo de latidos cada 20s."""
+def _pid_alive(pid_file: Path) -> bool:
+    if not pid_file.exists():
+        return False
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def run_heartbeat_loop(room_id, stream_id, session_id="default", cookies_path=None):
+    """Ciclo continuo de latidos cada 20s con autodetección si muere la sesión o el proxy."""
+    stop_requested = False
+
+    def _on_term(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+
+    signal.signal(signal.SIGTERM, _on_term)
+    signal.signal(signal.SIGINT, _on_term)
+
+    paths = _paths_for(session_id)
     stream = get_stream_client(cookies_path)
-    while True:
+    consecutive_errors = 0
+    dead_proxy_checks = 0
+
+    while not stop_requested:
+        # Si la sesión fue eliminada externamente, detener este daemon inmediatamente
+        if not paths["session_file"].exists():
+            break
+
+        # Si el proxy SEI dejó de existir por más de 2 ciclos seguidos, no quemar RapidAPI
+        if not _pid_alive(paths["proxy_pid"]):
+            dead_proxy_checks += 1
+            if dead_proxy_checks >= 2:
+                break
+        else:
+            dead_proxy_checks = 0
+
         try:
             stream.liveHeartbeat(room_id=str(room_id), stream_id=str(stream_id))
+            consecutive_errors = 0
+        except Exception as exc:
+            consecutive_errors += 1
+            msg = str(exc).lower()
+            if any(k in msg for k in ("not living", "room_close", "ended", "invalid room", "20003", "30001")):
+                break
+            if consecutive_errors >= 5:
+                break
+
+        for _ in range(20):
+            if stop_requested or not paths["session_file"].exists():
+                break
+            time.sleep(1)
+
+    paths["heartbeat_pid"].unlink(missing_ok=True)
+
+
+def cleanup_stale_sessions():
+    """Limpia sesiones huérfanas dejadas en tiktok/queue/* por caídas previas."""
+    import shutil
+    cleaned = []
+    if not QUEUE_ROOT.exists():
+        return cleaned
+
+    for entry in sorted(QUEUE_ROOT.iterdir()):
+        if not entry.is_dir():
+            continue
+        sid = entry.name
+        try:
+            session_file = entry / "tiktok_live_session.json"
+            cpath = None
+            if session_file.exists():
+                try:
+                    data = json.loads(session_file.read_text(encoding="utf-8"))
+                    cpath = data.get("cookies_path")
+                except Exception:
+                    pass
+            end_live_room(session_id=sid, cookies_path=cpath)
+            shutil.rmtree(entry, ignore_errors=True)
+            cleaned.append(sid)
         except Exception:
             pass
-        time.sleep(20)
+    return cleaned
 
 
 def _kill_pid_group(pid_file: Path):
@@ -284,13 +360,14 @@ def main():
     parser = argparse.ArgumentParser(description="TikTok Live Multi-Account Manager - Projecto 9x")
     parser.add_argument("--create", action="store_true", help="Crear sala TikTok Live con proxy SEI")
     parser.add_argument("--title", default="", help="Título de la transmisión")
-    parser.add_argument("--topic", default="42", help="ID del tema")
+    parser.add_argument("--topic", default="5", help="ID del tema/categoría TikTok")
     parser.add_argument("--cookies", default="", help="Ruta al archivo cookies.json de la cuenta")
     parser.add_argument("--session-id", default="default", help="ID único de sesión/slot")
     parser.add_argument("--listen-port", type=int, default=19350, help="Puerto RTMP local del proxy SEI")
     parser.add_argument("--fps", type=int, default=30, help="FPS del flujo")
     parser.add_argument("--resolution", default="1080x1920", help="Resolución WxH")
     parser.add_argument("--end", action="store_true", help="Cerrar sala y detener proxy")
+    parser.add_argument("--cleanup-stale", action="store_true", help="Limpiar sesiones huérfanas en queue/")
     parser.add_argument("--status", action="store_true", help="Consultar estado activo")
     parser.add_argument("--verify", action="store_true", help="Verificar cookies y sesión")
     parser.add_argument("--proxy-only", help="Iniciar proxy SEI apuntando a URL RTMP destino")
@@ -303,7 +380,16 @@ def main():
 
     if args.daemon_heartbeat:
         if args.room_id and args.stream_id:
-            run_heartbeat_loop(args.room_id, args.stream_id, cookies_path=cpath)
+            run_heartbeat_loop(
+                args.room_id,
+                args.stream_id,
+                session_id=args.session_id,
+                cookies_path=cpath,
+            )
+        return
+
+    if args.cleanup_stale:
+        print(json.dumps({"cleaned": cleanup_stale_sessions()}, ensure_ascii=False))
         return
 
     if args.verify:
