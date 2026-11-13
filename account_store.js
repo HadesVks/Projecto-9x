@@ -376,25 +376,57 @@ export class AccountStore {
     return { deleted: true, id };
   }
 
-  _normalizeRadarHandle(raw) {
+  _normalizeRadarTarget(raw) {
     const text = String(raw || '').trim();
-    if (!text) return '';
-    let candidate = text;
+    if (!text) return null;
+
     if (/^https?:\/\//i.test(text)) {
       try {
         const parsed = new URL(text);
-        if (!parsed.hostname.toLowerCase().endsWith('tiktok.com')) return '';
-        const first = parsed.pathname.split('/').filter(Boolean)[0] || '';
-        if (!first.startsWith('@')) return '';
-        candidate = first.slice(1);
+        const host = parsed.hostname.toLowerCase();
+        if (!['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(host)) return null;
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        if (!parts.length) return null;
+
+        if (parts[0].startsWith('@')) {
+          const h = parts[0].slice(1);
+          if (!/^[a-zA-Z0-9._-]{2,64}$/.test(h)) return null;
+          return {
+            handle: `@${h}`,
+            channelUrl: `https://www.youtube.com/@${h}/live`
+          };
+        }
+        if (parts[0] === 'channel' && /^UC[a-zA-Z0-9_-]{22}$/.test(parts[1] || '')) {
+          return {
+            handle: parts[1],
+            channelUrl: `https://www.youtube.com/channel/${parts[1]}/live`
+          };
+        }
+        if ((parts[0] === 'c' || parts[0] === 'user') && /^[a-zA-Z0-9._-]{2,64}$/.test(parts[1] || '')) {
+          return {
+            handle: parts[1],
+            channelUrl: `https://www.youtube.com/${parts[0]}/${parts[1]}/live`
+          };
+        }
+        return null;
       } catch {
-        return '';
+        return null;
       }
-    } else if (text.startsWith('@')) {
-      candidate = text.slice(1);
     }
-    candidate = candidate.trim().toLowerCase();
-    return /^[a-z0-9._-]{1,64}$/.test(candidate) ? candidate : '';
+
+    if (/^UC[a-zA-Z0-9_-]{22}$/.test(text)) {
+      return {
+        handle: text,
+        channelUrl: `https://www.youtube.com/channel/${text}/live`
+      };
+    }
+
+    const clean = text.startsWith('@') ? text.slice(1).trim() : text.trim();
+    if (!/^[a-zA-Z0-9._-]{2,64}$/.test(clean)) return null;
+    return {
+      handle: `@${clean}`,
+      channelUrl: `https://www.youtube.com/@${clean}/live`
+    };
   }
 
   listRadar() {
@@ -402,10 +434,12 @@ export class AccountStore {
   }
 
   addRadarCreator({ handle, note = '' }) {
-    const clean = this._normalizeRadarHandle(handle);
-    if (!clean) throw new Error('Handle de TikTok inválido (usa @usuario o URL de TikTok).');
+    const norm = this._normalizeRadarTarget(handle);
+    if (!norm) throw new Error('Canal de YouTube inválido (usa @canal o URL de canal de YouTube).');
     if (!Array.isArray(this.data.radarCreators)) this.data.radarCreators = [];
-    const existing = this.data.radarCreators.find((r) => r.handle.toLowerCase() === clean);
+    const existing = this.data.radarCreators.find(
+      (r) => r.handle.toLowerCase() === norm.handle.toLowerCase()
+    );
     if (existing) {
       if (note && note.trim()) {
         existing.note = note.trim().slice(0, 80);
@@ -414,10 +448,11 @@ export class AccountStore {
       return { ...existing };
     }
     if (this.data.radarCreators.length >= 60) {
-      throw new Error('Límite de 60 creadores en Radar alcanzado.');
+      throw new Error('Límite de 60 canales en Radar alcanzado.');
     }
     const entry = {
-      handle: clean,
+      handle: norm.handle,
+      channelUrl: norm.channelUrl,
       note: String(note || '').trim().slice(0, 80),
       addedAt: new Date().toISOString()
     };
@@ -427,14 +462,19 @@ export class AccountStore {
   }
 
   removeRadarCreator(handle) {
-    const clean = this._normalizeRadarHandle(handle);
-    if (!clean) throw new Error('Handle inválido.');
+    const raw = String(handle || '').trim();
+    const norm = this._normalizeRadarTarget(raw);
+    const key = (norm?.handle || raw).toLowerCase();
+    if (!key) throw new Error('Canal inválido.');
     if (!Array.isArray(this.data.radarCreators)) this.data.radarCreators = [];
-    const idx = this.data.radarCreators.findIndex((r) => r.handle.toLowerCase() === clean);
-    if (idx === -1) throw new Error('Creador no encontrado en el Radar.');
+    const idx = this.data.radarCreators.findIndex(
+      (r) => r.handle.toLowerCase() === key || r.handle.replace(/^@/, '').toLowerCase() === key.replace(/^@/, '')
+    );
+    if (idx === -1) throw new Error('Canal no encontrado en el Radar.');
+    const removed = this.data.radarCreators[idx];
     this.data.radarCreators.splice(idx, 1);
     this._save();
-    return { deleted: true, handle: clean };
+    return { deleted: true, handle: removed.handle };
   }
 
   async verifyTikTokAccount(id) {

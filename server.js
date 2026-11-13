@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { AccountStore } from './account_store.js';
 import { ChannelMonitor } from './channel_monitor.js';
-import { TikTokDiscoveryService } from './tiktok_scraper.js';
+import { YouTubeDiscoveryService } from './youtube_scraper.js';
 import {
   StreamManager,
   QUALITY_PROFILES,
@@ -28,7 +28,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const store = new AccountStore();
 const manager = new StreamManager();
 const monitor = new ChannelMonitor(store, manager);
-const discovery = new TikTokDiscoveryService(store);
+const discovery = new YouTubeDiscoveryService(store);
 
 const sseClients = new Set();
 
@@ -442,7 +442,7 @@ app.get('/api/discovery/lookup', async (req, res) => {
     return res.status(400).json({ error: 'El parámetro target (@usuario o URL) es obligatorio.' });
   }
   const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
-  const result = await discovery.lookupUser(target, { forceRefresh });
+  const result = await discovery.lookupChannel(target, { forceRefresh });
   res.json(result);
 });
 

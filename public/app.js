@@ -112,6 +112,7 @@ const dom = {
   // Discover & Radar
   discoverKeyword: document.getElementById('discoverKeyword'),
   discoverMinViewers: document.getElementById('discoverMinViewers'),
+  discoverTargetAccountSelect: document.getElementById('discoverTargetAccountSelect'),
   discoverSearchBtn: document.getElementById('discoverSearchBtn'),
   discoverLookupBtn: document.getElementById('discoverLookupBtn'),
   discoverRefreshBtn: document.getElementById('discoverRefreshBtn'),
@@ -537,6 +538,9 @@ function renderAccountSelect() {
   renderAccountDropdown(dom.monAccountSelect, {
     disableBtn: dom.saveMonitorBtn
   });
+  if (dom.discoverTargetAccountSelect) {
+    renderAccountDropdown(dom.discoverTargetAccountSelect);
+  }
 }
 
 function syncSelectedAccountUI() {
@@ -1400,8 +1404,11 @@ function bindEvents() {
       if (e.key === 'Enter') {
         e.preventDefault();
         const val = dom.discoverKeyword.value.trim();
-        if (val.startsWith('@') || val.includes('tiktok.com/@')) handleDiscoverLookup(val);
-        else handleDiscoverSearch(false);
+        if (val.startsWith('@') || val.includes('youtube.com/') || val.includes('youtu.be/')) {
+          handleDiscoverLookup(val);
+        } else {
+          handleDiscoverSearch(false);
+        }
       }
     });
   }
@@ -1566,19 +1573,33 @@ function syncRadarList(rawRadar) {
   });
 }
 
+function formatYouTubeHandle(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.startsWith('@') || s.startsWith('UC')) return s;
+  return `@${s}`;
+}
+
+function getChosenDestinationAccount() {
+  const chosenId = dom.discoverTargetAccountSelect?.value || dom.accountSelect?.value || '';
+  return state.accounts.find((a) => a.id === chosenId) || state.accounts[0] || null;
+}
+
 function renderRadarList() {
   if (dom.radarCount) dom.radarCount.textContent = String(state.radar.length);
   if (!dom.radarList) return;
 
   if (state.radar.length === 0) {
-    dom.radarList.innerHTML = '<div class="empty-state-box">No sigues creadores aún. Agrega un @usuario arriba o pulsa ⭐ Seguir en cualquier resultado.</div>';
+    dom.radarList.innerHTML = '<div class="empty-state-box">No sigues canales de YouTube aún. Agrega un @canal arriba o pulsa ⭐ Seguir en cualquier resultado.</div>';
     return;
   }
 
   dom.radarList.innerHTML = state.radar.map((item) => {
-    const handle = esc(item.handle);
-    const liveUrl = esc(item.live_url || `https://www.tiktok.com/@${item.handle}/live`);
-    const title = esc(item.title || item.note || 'Sin título');
+    const rawHandle = String(item.handle || '');
+    const displayHandle = esc(formatYouTubeHandle(rawHandle));
+    const channelLiveUrl = esc(item.channel_live_url || item.channelUrl || `https://www.youtube.com/${formatYouTubeHandle(rawHandle)}/live`);
+    const watchUrl = esc(item.is_live && item.live_url ? item.live_url : channelLiveUrl);
+    const title = esc(item.title || item.note || item.channel_name || 'Canal de YouTube');
     const isLive = Boolean(item.is_live);
     const badge = isLive
       ? `<span class="radar-badge-live">🔴 EN VIVO • ${formatViewers(item.viewers)}</span>`
@@ -1587,14 +1608,14 @@ function renderRadarList() {
     return `
       <div class="radar-item ${isLive ? 'is-live' : ''}">
         <div class="radar-item-head">
-          <span class="radar-handle">@${handle}</span>
+          <span class="radar-handle">${displayHandle}</span>
           ${badge}
         </div>
         <small class="hint" title="${title}">${title}</small>
         <div class="discover-actions">
-          <button type="button" class="btn btn-sm btn-accent-sm" data-action="restream" data-url="${liveUrl}" data-title="${esc(item.title || '')}" data-handle="${handle}">▶ Retransmitir</button>
-          <button type="button" class="btn btn-sm btn-neutral-sm" data-action="monitor" data-url="${liveUrl}" data-handle="${handle}">🤖 Vigilar</button>
-          <button type="button" class="btn btn-sm btn-danger-sm" data-action="unfollow" data-handle="${handle}" title="Quitar del Radar">🗑️</button>
+          <button type="button" class="btn btn-sm btn-accent-sm" data-action="restream" data-url="${watchUrl}" data-monitor-url="${channelLiveUrl}" data-title="${esc(item.title || '')}" data-handle="${esc(rawHandle)}" data-name="${esc(item.channel_name || rawHandle)}">▶ Retransmitir</button>
+          <button type="button" class="btn btn-sm btn-neutral-sm" data-action="monitor" data-monitor-url="${channelLiveUrl}" data-handle="${esc(rawHandle)}" data-name="${esc(item.channel_name || rawHandle)}">🤖 Vigilar</button>
+          <button type="button" class="btn btn-sm btn-danger-sm" data-action="unfollow" data-handle="${esc(rawHandle)}" title="Quitar del Radar">🗑️</button>
         </div>
       </div>
     `;
@@ -1606,22 +1627,20 @@ function renderDiscoverResults() {
   const items = state.discover.items || [];
 
   if (items.length === 0) {
-    dom.discoverResultsGrid.innerHTML = '<div class="empty-state-box">No se encontraron transmisiones en vivo con ese filtro. Prueba otra categoría o @usuario.</div>';
+    dom.discoverResultsGrid.innerHTML = '<div class="empty-state-box">No se encontraron transmisiones en vivo en YouTube con ese filtro. Prueba otra categoría o @canal.</div>';
     return;
   }
 
   dom.discoverResultsGrid.innerHTML = items.map((item) => {
-    const handle = esc(item.handle);
-    const nickname = esc(item.nickname || item.handle);
-    const title = esc(item.title || 'Transmisión en vivo');
-    const category = item.category ? ` • #${esc(item.category)}` : '';
-    const liveUrl = esc(item.live_url || `https://www.tiktok.com/@${item.handle}/live`);
+    const rawHandle = String(item.handle || '');
+    const displayHandle = esc(formatYouTubeHandle(rawHandle));
+    const channelName = esc(item.channel_name || displayHandle);
+    const title = esc(item.title || 'Transmisión en vivo de YouTube');
+    const watchUrl = esc(item.live_url || item.channel_live_url || '');
+    const channelLiveUrl = esc(item.channel_live_url || item.live_url || '');
     const coverSrc = safeHttpImg(item.cover);
     const avatarSrc = safeHttpImg(item.avatar);
-    const w = Number(item.width) || 0;
-    const h = Number(item.height) || 0;
-    const aspectLabel = w > 0 && h > 0 ? (w / h <= 0.72 ? '9:16 Vertical' : '16:9 Horiz.') : 'TikTok Live';
-    const followed = isInRadar(item.handle);
+    const followed = isInRadar(rawHandle);
 
     const statusPill = item.is_live
       ? `<span class="discover-viewers-pill">🔴 ${formatViewers(item.viewers)} viewers</span>`
@@ -1630,23 +1649,23 @@ function renderDiscoverResults() {
     return `
       <article class="discover-card">
         <div class="discover-thumb-wrap">
-          ${coverSrc ? `<img class="discover-thumb" src="${esc(coverSrc)}" referrerpolicy="no-referrer" alt="@${handle}" onerror="this.style.display='none'" />` : ''}
+          ${coverSrc ? `<img class="discover-thumb" src="${esc(coverSrc)}" referrerpolicy="no-referrer" alt="${displayHandle}" onerror="this.style.display='none'" />` : ''}
           ${statusPill}
-          <span class="discover-aspect-pill">${aspectLabel}</span>
+          <span class="discover-aspect-pill">YouTube Live</span>
         </div>
         <div class="discover-card-body">
           <div class="discover-creator-row">
             ${avatarSrc ? `<img class="discover-avatar" src="${esc(avatarSrc)}" referrerpolicy="no-referrer" alt="" onerror="this.style.display='none'" />` : ''}
             <div class="discover-creator-meta">
-              <strong>@${handle}</strong>
-              <small>${nickname}${category}</small>
+              <strong>${channelName}</strong>
+              <small>${displayHandle}</small>
             </div>
           </div>
           <div class="discover-title" title="${title}">${title}</div>
           <div class="discover-actions">
-            <button type="button" class="btn btn-sm btn-accent-sm" data-action="restream" data-url="${liveUrl}" data-title="${esc(item.title || '')}" data-handle="${handle}">▶ Retransmitir</button>
-            <button type="button" class="btn btn-sm btn-neutral-sm" data-action="monitor" data-url="${liveUrl}" data-handle="${handle}">🤖 24/7</button>
-            <button type="button" class="btn btn-sm ${followed ? 'btn-neutral-sm' : 'btn-accent-sm'}" data-action="${followed ? 'unfollow' : 'follow'}" data-handle="${handle}" data-title="${esc(item.title || '')}">${followed ? '★ Siguiendo' : '⭐ Seguir'}</button>
+            <button type="button" class="btn btn-sm btn-accent-sm" data-action="restream" data-url="${watchUrl}" data-monitor-url="${channelLiveUrl}" data-title="${esc(item.title || '')}" data-handle="${esc(rawHandle)}" data-name="${channelName}">▶ Retransmitir</button>
+            <button type="button" class="btn btn-sm btn-neutral-sm" data-action="monitor" data-monitor-url="${channelLiveUrl}" data-handle="${esc(rawHandle)}" data-name="${channelName}">🤖 24/7</button>
+            <button type="button" class="btn btn-sm ${followed ? 'btn-neutral-sm' : 'btn-accent-sm'}" data-action="${followed ? 'unfollow' : 'follow'}" data-handle="${esc(rawHandle)}" data-monitor-url="${channelLiveUrl}" data-title="${esc(item.title || '')}">${followed ? '★ Siguiendo' : '⭐ Seguir'}</button>
           </div>
         </div>
       </article>
@@ -1657,7 +1676,7 @@ function renderDiscoverResults() {
 async function handleDiscoverSearch(forceRefresh = false, overrideKeyword = '') {
   const kw = String(overrideKeyword || dom.discoverKeyword?.value || state.discover.lastKeyword || '').trim();
   if (!kw) {
-    notify('Escribe una palabra clave o elige una categoría.', true);
+    notify('Escribe una palabra clave o elige una categoría de YouTube.', true);
     return;
   }
   const minViewers = Number(dom.discoverMinViewers?.value) || 0;
@@ -1667,7 +1686,7 @@ async function handleDiscoverSearch(forceRefresh = false, overrideKeyword = '') 
 
   if (dom.discoverSearchBtn) dom.discoverSearchBtn.disabled = true;
   if (dom.discoverRefreshBtn) dom.discoverRefreshBtn.disabled = true;
-  setDiscoverBanner(`Buscando transmisiones en vivo de "${kw}"...`, 'info');
+  setDiscoverBanner(`Buscando directos en YouTube para "${kw}"...`, 'info');
 
   try {
     const qs = new URLSearchParams({
@@ -1679,7 +1698,7 @@ async function handleDiscoverSearch(forceRefresh = false, overrideKeyword = '') 
 
     const data = await apiJson(`/api/discovery/search?${qs.toString()}`);
     if (data.blocked) {
-      setDiscoverBanner(`⚠️ ${data.error || 'TikTok devolvió verificación temporal/CAPTCHA. Espera unos minutos o actualiza tus cookies.'}`, 'warn');
+      setDiscoverBanner(`⚠️ ${data.error || 'YouTube devolvió verificación temporal (rate-limit/CAPTCHA). Espera unos minutos.'}`, 'warn');
     } else if (!data.success && data.error) {
       setDiscoverBanner(`⚠️ ${data.error}`, 'warn');
     } else {
@@ -1688,7 +1707,7 @@ async function handleDiscoverSearch(forceRefresh = false, overrideKeyword = '') 
 
     state.discover.items = Array.isArray(data.items) ? data.items : [];
     if (dom.discoverResultsTitle) {
-      dom.discoverResultsTitle.textContent = `Resultados: "${kw}" (${state.discover.items.length})`;
+      dom.discoverResultsTitle.textContent = `YouTube Live: "${kw}" (${state.discover.items.length})`;
     }
     if (dom.discoverCacheHint) {
       dom.discoverCacheHint.textContent = data.cached
@@ -1707,16 +1726,16 @@ async function handleDiscoverSearch(forceRefresh = false, overrideKeyword = '') 
 async function handleDiscoverLookup(overrideTarget = '') {
   const raw = String(overrideTarget || dom.discoverKeyword?.value || '').trim();
   if (!raw) {
-    notify('Escribe un @usuario o URL de TikTok en el buscador.', true);
+    notify('Escribe un @canal o URL de YouTube en el buscador.', true);
     return;
   }
   if (dom.discoverLookupBtn) dom.discoverLookupBtn.disabled = true;
-  setDiscoverBanner(`Consultando sala de "${raw}"...`, 'info');
+  setDiscoverBanner(`Consultando canal de YouTube "${raw}"...`, 'info');
 
   try {
     const data = await apiJson(`/api/discovery/lookup?target=${encodeURIComponent(raw)}&refresh=1`);
     if (data.blocked) {
-      setDiscoverBanner(`⚠️ ${data.error || 'Verificación temporal de TikTok.'}`, 'warn');
+      setDiscoverBanner(`⚠️ ${data.error || 'Verificación temporal de YouTube.'}`, 'warn');
     } else if (!data.success && data.error) {
       setDiscoverBanner(`⚠️ ${data.error}`, 'warn');
     } else {
@@ -1726,10 +1745,10 @@ async function handleDiscoverLookup(overrideTarget = '') {
     state.discover.items = data.handle ? [data] : [];
     state.discover.lastMode = 'lookup';
     if (dom.discoverResultsTitle) {
-      dom.discoverResultsTitle.textContent = data.handle ? `Usuario: @${data.handle}` : 'Consulta de Usuario';
+      dom.discoverResultsTitle.textContent = data.handle ? `Canal: ${formatYouTubeHandle(data.handle)}` : 'Consulta de Canal';
     }
     if (dom.discoverCacheHint) {
-      dom.discoverCacheHint.textContent = data.is_live ? '🟢 Transmitiendo ahora' : '⚫ Offline en este momento';
+      dom.discoverCacheHint.textContent = data.is_live ? '🟢 Transmitiendo en YouTube ahora' : '⚫ Offline en este momento';
     }
     renderDiscoverResults();
   } catch (err) {
@@ -1749,7 +1768,7 @@ async function loadRadarStatus(forceRefresh = false) {
       state.radar = data.items;
     }
     if (data.blocked) {
-      setDiscoverBanner(`⚠️ ${data.error || 'TikTok limitó temporalmente la consulta del Radar.'}`, 'warn');
+      setDiscoverBanner(`⚠️ ${data.error || 'YouTube limitó temporalmente la consulta del Radar.'}`, 'warn');
     }
     renderRadarList();
     renderDiscoverResults();
@@ -1764,7 +1783,7 @@ async function handleAddRadarCreator() {
   const handle = String(dom.radarHandleInput?.value || '').trim();
   const note = String(dom.radarNoteInput?.value || '').trim();
   if (!handle) {
-    notify('Escribe un @usuario o URL de TikTok.', true);
+    notify('Escribe un @canal o URL de YouTube.', true);
     return;
   }
   if (dom.radarAddBtn) dom.radarAddBtn.disabled = true;
@@ -1781,7 +1800,7 @@ async function handleAddRadarCreator() {
     if (dom.radarNoteInput) dom.radarNoteInput.value = '';
     renderRadarList();
     renderDiscoverResults();
-    notify(`@${data.entry?.handle || handle} agregado al Radar.`);
+    notify(`${formatYouTubeHandle(data.entry?.handle || handle)} agregado al Radar.`);
   } catch (err) {
     notify(err.message, true);
   } finally {
@@ -1794,47 +1813,63 @@ async function handleDiscoverCardAction(e) {
   if (!btn) return;
   const action = btn.dataset.action;
   const handle = btn.dataset.handle || '';
-  const url = btn.dataset.url || (handle ? `https://www.tiktok.com/@${handle}/live` : '');
+  const name = btn.dataset.name || formatYouTubeHandle(handle);
+  const watchUrl = btn.dataset.url || '';
+  const monitorUrl = btn.dataset.monitorUrl || watchUrl;
   const title = btn.dataset.title || '';
 
-  if (action === 'restream' && url) {
+  if (action === 'restream' && (watchUrl || monitorUrl)) {
+    const destAcc = getChosenDestinationAccount();
     switchTab('streams');
+    if (destAcc && dom.accountSelect) {
+      dom.accountSelect.value = destAcc.id;
+      syncSelectedAccountUI();
+    }
     if (dom.sourceUrl) {
-      dom.sourceUrl.value = url;
+      dom.sourceUrl.value = watchUrl || monitorUrl;
       dom.sourceUrl.focus();
     }
-    if (dom.modeSelect) dom.modeSelect.value = 'vertical_blur';
-    if (dom.tiktokTitle && !dom.tiktokTitle.value.trim() && title) {
+    if (dom.modeSelect) {
+      dom.modeSelect.value = destAcc?.platform === 'tiktok' ? 'vertical_blur' : 'copy';
+    }
+    if (dom.tiktokTitle && destAcc?.platform === 'tiktok' && !dom.tiktokTitle.value.trim() && title) {
       dom.tiktokTitle.value = title.slice(0, 60);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    notify(`Enlace de @${handle} cargado. Elige tu cuenta destino e inicia.`);
+    const destLabel = destAcc ? `${destAcc.name} (${destAcc.platform.toUpperCase()})` : 'tu cuenta destino';
+    notify(`Directo de YouTube cargado hacia ${destLabel}.`);
     return;
   }
 
-  if (action === 'monitor' && url) {
+  if (action === 'monitor' && (monitorUrl || watchUrl)) {
+    const destAcc = getChosenDestinationAccount();
     switchTab('monitors');
-    if (dom.monChannelUrl) dom.monChannelUrl.value = url;
-    if (dom.monName && handle) dom.monName.value = `@${handle}`;
-    if (dom.monMode) dom.monMode.value = 'vertical_blur';
+    if (destAcc && dom.monAccountSelect) {
+      dom.monAccountSelect.value = destAcc.id;
+    }
+    if (dom.monChannelUrl) dom.monChannelUrl.value = monitorUrl || watchUrl;
+    if (dom.monName && (name || handle)) dom.monName.value = name || formatYouTubeHandle(handle);
+    if (dom.monMode) {
+      dom.monMode.value = destAcc?.platform === 'tiktok' ? 'vertical_blur' : 'copy';
+    }
     if (dom.monAccountSelect) dom.monAccountSelect.focus();
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    notify(`@${handle} cargado en Auto-Restreamer 24/7.`);
+    notify(`Canal ${formatYouTubeHandle(handle)} cargado en Auto-Restreamer 24/7.`);
     return;
   }
 
-  if (action === 'follow' && handle) {
+  if (action === 'follow' && (handle || monitorUrl)) {
     btn.disabled = true;
     try {
       const data = await apiJson('/api/discovery/radar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ handle, note: title.slice(0, 60) })
+        body: JSON.stringify({ handle: monitorUrl || handle, note: title.slice(0, 60) })
       });
       if (Array.isArray(data.radar)) syncRadarList(data.radar);
       renderRadarList();
       renderDiscoverResults();
-      notify(`@${handle} guardado en tu Radar.`);
+      notify(`${formatYouTubeHandle(handle)} guardado en tu Radar.`);
     } catch (err) {
       notify(err.message, true);
       btn.disabled = false;
@@ -1851,7 +1886,7 @@ async function handleDiscoverCardAction(e) {
       if (Array.isArray(data.radar)) syncRadarList(data.radar);
       renderRadarList();
       renderDiscoverResults();
-      notify(`@${handle} eliminado del Radar.`);
+      notify(`${formatYouTubeHandle(handle)} eliminado del Radar.`);
     } catch (err) {
       notify(err.message, true);
       btn.disabled = false;

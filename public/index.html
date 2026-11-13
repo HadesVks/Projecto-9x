@@ -30,7 +30,7 @@
     <!-- Navigation Tabs -->
     <nav class="nav-tabs">
       <button type="button" class="tab-btn active" data-tab="streams">📡 Transmisiones Simultáneas</button>
-      <button type="button" class="tab-btn" data-tab="discover">🔎 Explorar TikTok (<span id="radarCount">0</span>)</button>
+      <button type="button" class="tab-btn" data-tab="discover">🔎 Explorar YouTube (<span id="radarCount">0</span>)</button>
       <button type="button" class="tab-btn" data-tab="monitors">🤖 Auto-Restreamer 24/7 (<span id="monitorsCount">0</span>)</button>
       <button type="button" class="tab-btn" data-tab="accounts">👥 Cuentas de Emisión (<span id="accountsCount">0</span>)</button>
     </nav>
@@ -52,11 +52,11 @@
             </div>
 
             <div class="form-group">
-              <label for="sourceUrl">📺 URL del En Vivo de Origen (TikTok / YouTube / Twitch / Kick)</label>
+              <label for="sourceUrl">📺 URL del En Vivo de Origen (YouTube / Twitch / Kick)</label>
               <input
                 type="url"
                 id="sourceUrl"
-                placeholder="https://www.tiktok.com/@usuario/live o YouTube/Twitch..."
+                placeholder="https://www.youtube.com/live/..."
                 required
               />
             </div>
@@ -370,21 +370,21 @@
       </div>
     </section>
 
-    <!-- TAB 4: EXPLORAR TIKTOK -->
+    <!-- TAB 4: EXPLORAR YOUTUBE -->
     <section id="tab-discover" class="tab-panel">
       <div class="discover-layout">
-        <!-- Buscador global + categorías -->
+        <!-- Buscador global + categorías YouTube -->
         <section class="card discover-search-card">
           <div class="card-header">
-            <h2>Buscador de Lives en TikTok</h2>
-            <span class="tag tag-accent">Sin consumo RapidAPI</span>
+            <h2>Buscador de Lives en YouTube</h2>
+            <span class="tag tag-accent">Solo YouTube Live • Sin API Key</span>
           </div>
 
           <div class="discover-search-bar">
             <input
               type="text"
               id="discoverKeyword"
-              placeholder="Busca por juego, tema o escribe @usuario..."
+              placeholder="Busca directos en YouTube por tema, juego o @canal..."
             />
             <select id="discoverMinViewers" title="Mínimo de espectadores">
               <option value="0">Cualquier audiencia</option>
@@ -393,35 +393,40 @@
               <option value="500">500+ viewers</option>
             </select>
             <button type="button" id="discoverSearchBtn" class="btn btn-primary btn-compact">🔍 Buscar Lives</button>
-            <button type="button" id="discoverLookupBtn" class="btn btn-sm btn-accent-sm">👤 Ver @Usuario</button>
+            <button type="button" id="discoverLookupBtn" class="btn btn-sm btn-accent-sm">📺 Ver @Canal</button>
             <button type="button" id="discoverRefreshBtn" class="btn btn-sm btn-neutral-sm" title="Forzar actualización sin caché">🔄</button>
           </div>
 
+          <div class="discover-dest-row">
+            <label for="discoverTargetAccountSelect">🎯 Plataforma / cuenta destino al retransmitir:</label>
+            <select id="discoverTargetAccountSelect"></select>
+          </div>
+
           <div class="discover-presets" id="discoverPresets">
-            <button type="button" class="preset-chip" data-keyword="gaming">🎮 Gaming</button>
-            <button type="button" class="preset-chip" data-keyword="free fire">🔥 Free Fire</button>
-            <button type="button" class="preset-chip" data-keyword="gta">🚗 GTA V</button>
-            <button type="button" class="preset-chip" data-keyword="fortnite">🪂 Fortnite</button>
-            <button type="button" class="preset-chip" data-keyword="roblox">🧱 Roblox</button>
-            <button type="button" class="preset-chip" data-keyword="musica">🎵 Música</button>
-            <button type="button" class="preset-chip" data-keyword="charlando">💬 Charlando / IRL</button>
-            <button type="button" class="preset-chip" data-keyword="futbol">⚽ Fútbol</button>
+            <button type="button" class="preset-chip" data-keyword="gaming en vivo">🎮 Gaming</button>
+            <button type="button" class="preset-chip" data-keyword="free fire en vivo">🔥 Free Fire</button>
+            <button type="button" class="preset-chip" data-keyword="gta v en vivo">🚗 GTA V</button>
+            <button type="button" class="preset-chip" data-keyword="fortnite live">🪂 Fortnite</button>
+            <button type="button" class="preset-chip" data-keyword="minecraft live">🧱 Minecraft</button>
+            <button type="button" class="preset-chip" data-keyword="lofi music live">🎵 Música 24/7</button>
+            <button type="button" class="preset-chip" data-keyword="podcast en vivo">💬 Charlas / Podcast</button>
+            <button type="button" class="preset-chip" data-keyword="futbol en vivo">⚽ Fútbol</button>
           </div>
 
           <div id="discoverStatusBanner" class="discover-banner" style="display: none;"></div>
         </section>
 
-        <!-- Radar de Creadores Guardados -->
+        <!-- Radar de Canales YouTube Guardados -->
         <section class="card discover-radar-card">
           <div class="card-header">
-            <h2>Radar de Creadores (@Watchlist)</h2>
+            <h2>Radar de Canales YouTube (@Watchlist)</h2>
             <button type="button" id="radarCheckBtn" class="btn btn-sm btn-accent-sm">🔄 Comprobar Radar</button>
           </div>
 
           <form class="radar-add-form" onsubmit="return false;">
-            <input type="text" id="radarHandleInput" placeholder="@creador o URL de TikTok..." />
-            <input type="text" id="radarNoteInput" placeholder="Nota opcional (ej: Torneo Free Fire)" />
-            <button type="button" id="radarAddBtn" class="btn btn-sm btn-primary btn-compact">⭐ Seguir</button>
+            <input type="text" id="radarHandleInput" placeholder="@canal o URL de canal de YouTube..." />
+            <input type="text" id="radarNoteInput" placeholder="Nota opcional (ej: Torneo Gaming)" />
+            <button type="button" id="radarAddBtn" class="btn btn-sm btn-primary btn-compact">⭐ Seguir Canal</button>
           </form>
 
           <div id="radarList" class="radar-grid"></div>
@@ -430,8 +435,8 @@
         <!-- Resultados de búsqueda -->
         <section class="streams-column">
           <div class="section-title-bar">
-            <h2 id="discoverResultsTitle">Resultados en Vivo</h2>
-            <span id="discoverCacheHint" class="hint">Selecciona una categoría o busca una palabra clave</span>
+            <h2 id="discoverResultsTitle">Directos en YouTube</h2>
+            <span id="discoverCacheHint" class="hint">Elige una categoría o busca por palabra clave, luego retransmite a tu plataforma favorita</span>
           </div>
           <div id="discoverResultsGrid" class="discover-grid"></div>
         </section>
