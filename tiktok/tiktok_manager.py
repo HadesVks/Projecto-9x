@@ -283,31 +283,55 @@ def run_heartbeat_loop(room_id, stream_id, session_id="default", cookies_path=No
     paths["heartbeat_pid"].unlink(missing_ok=True)
 
 
+def _prune_frame_sign_cache():
+    """Elimina claves expiradas de frame_sign_cache.json para evitar crecimiento ilimitado."""
+    cache_path = LOGS_ROOT / "frame_sign_cache.json"
+    if not cache_path.exists():
+        return
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        cutoff = int(time.time()) - 600
+        pruned = {
+            k: v
+            for k, v in data.items()
+            if isinstance(v, dict) and int(v.get("until") or 0) >= cutoff
+        }
+        if len(pruned) < len(data):
+            tmp_path = cache_path.with_name(f"{cache_path.stem}.{os.getpid()}.tmp")
+            tmp_path.write_text(json.dumps(pruned), encoding="utf-8")
+            os.replace(tmp_path, cache_path)
+    except Exception:
+        pass
+
+
 def cleanup_stale_sessions():
-    """Limpia sesiones huérfanas dejadas en tiktok/queue/* por caídas previas."""
+    """Limpia sesiones huérfanas dejadas en tiktok/queue/* y caché expirada al arranque."""
     import shutil
     cleaned = []
-    if not QUEUE_ROOT.exists():
-        return cleaned
-
-    for entry in sorted(QUEUE_ROOT.iterdir()):
-        if not entry.is_dir():
-            continue
-        sid = entry.name
-        try:
-            session_file = entry / "tiktok_live_session.json"
-            cpath = None
-            if session_file.exists():
-                try:
-                    data = json.loads(session_file.read_text(encoding="utf-8"))
-                    cpath = data.get("cookies_path")
-                except Exception:
-                    pass
-            end_live_room(session_id=sid, cookies_path=cpath)
-            shutil.rmtree(entry, ignore_errors=True)
-            cleaned.append(sid)
-        except Exception:
-            pass
+    if QUEUE_ROOT.exists():
+        for entry in sorted(QUEUE_ROOT.iterdir()):
+            if not entry.is_dir():
+                continue
+            sid = entry.name
+            try:
+                session_file = entry / "tiktok_live_session.json"
+                cpath = None
+                if session_file.exists():
+                    try:
+                        data = json.loads(session_file.read_text(encoding="utf-8"))
+                        cpath = data.get("cookies_path")
+                    except Exception:
+                        pass
+                end_live_room(session_id=sid, cookies_path=cpath)
+                shutil.rmtree(entry, ignore_errors=True)
+                for suffix in ("_proxy.log", "_heartbeat.log"):
+                    (LOGS_ROOT / f"{sid}{suffix}").unlink(missing_ok=True)
+                cleaned.append(sid)
+            except Exception:
+                pass
+    _prune_frame_sign_cache()
     return cleaned
 
 

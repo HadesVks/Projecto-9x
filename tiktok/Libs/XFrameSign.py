@@ -403,12 +403,17 @@ def _persist_cache(key: tuple) -> None:
     }
     if not items:
         return
+    cutoff = now - 2 * FRAME_SIGN_CACHE_SECONDS
     existing = {}
     try:
         with open(_CACHE_PATH, "r", encoding="utf-8") as fh:
-            existing = json.load(fh)
-            if not isinstance(existing, dict):
-                existing = {}
+            raw = json.load(fh)
+            if isinstance(raw, dict):
+                existing = {
+                    k: v
+                    for k, v in raw.items()
+                    if isinstance(v, dict) and int(v.get("until") or 0) >= cutoff
+                }
     except Exception:
         existing = {}
     existing[_cache_key_str(key)] = {"items": items, "until": until}

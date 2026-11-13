@@ -16,6 +16,12 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.parse.failed') {
+    return res.status(400).json({ success: false, error: 'JSON inválido en la petición.' });
+  }
+  return next(err);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 const store = new AccountStore();
@@ -56,7 +62,13 @@ function parseCookies(req) {
     if (idx === -1) continue;
     const k = pair.slice(0, idx).trim();
     const v = pair.slice(idx + 1).trim();
-    if (k) out[k] = decodeURIComponent(v);
+    if (k) {
+      try {
+        out[k] = decodeURIComponent(v);
+      } catch {
+        out[k] = v;
+      }
+    }
   }
   return out;
 }
@@ -241,6 +253,12 @@ app.delete('/api/accounts/:id', (req, res) => {
       });
     }
     const result = store.deleteAccount(req.params.id);
+    for (const mon of store.listMonitors()) {
+      if (mon.accountId === req.params.id && mon.enabled) {
+        store.updateMonitor(mon.id, { enabled: false });
+        monitor.refreshMonitor(mon.id);
+      }
+    }
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });

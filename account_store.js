@@ -168,7 +168,7 @@ export class AccountStore {
     const plat = (platform || 'custom').trim();
     const mode = plat === 'tiktok' ? (authType || 'cookies') : 'manual';
 
-    const id = `acc-${plat}-${Date.now().toString(36)}`;
+    const id = `acc-${plat}-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`;
     let cookiesRel = '';
 
     if (plat === 'tiktok' && mode === 'cookies') {
@@ -340,7 +340,7 @@ export class AccountStore {
     }
 
     const mon = {
-      id: `mon-${Date.now().toString(36)}`,
+      id: `mon-${Date.now().toString(36)}-${crypto.randomBytes(2).toString('hex')}`,
       name,
       channelUrl,
       accountId,

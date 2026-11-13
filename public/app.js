@@ -1369,7 +1369,17 @@ function connectSSE() {
   es.addEventListener('init', (ev) => {
     try {
       const payload = JSON.parse(ev.data);
+      const validIds = new Set((payload.streams || []).map((s) => s.id));
       state.streams.clear();
+      for (const sid of Array.from(state.logsByStream.keys())) {
+        if (!validIds.has(sid)) state.logsByStream.delete(sid);
+      }
+      for (const sid of Array.from(state.openLogs)) {
+        if (!validIds.has(sid)) state.openLogs.delete(sid);
+      }
+      for (const sid of Array.from(state.donationCapableStreams)) {
+        if (!validIds.has(sid)) state.donationCapableStreams.delete(sid);
+      }
       for (const s of payload.streams || []) {
         trackDonationCapability(s);
         state.streams.set(s.id, s);

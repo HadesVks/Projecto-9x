@@ -148,6 +148,7 @@ export class StreamInstance extends EventEmitter {
     this.startedAt = null;
     this.reconnectTimeout = null;
     this.isManualStop = false;
+    this.isDestroyed = false;
     this.ytdlpFinishedCleanly = false;
     this.forceSoftwareFallback = false;
     this.hasDrawtextFilter = false;
@@ -159,6 +160,8 @@ export class StreamInstance extends EventEmitter {
     this.donationRotateTimer = null;
     this.watchdogTimer = null;
     this.stopForceTimer = null;
+    this._stopPromise = null;
+    this._exitNotifyResolvers = [];
     this.consecutiveEarlyFailures = 0;
     this.maxEarlyRetries = 5;
     this.lastProgressAt = 0;
@@ -173,7 +176,14 @@ export class StreamInstance extends EventEmitter {
     };
   }
 
+  _emitStatus() {
+    if (!this.isDestroyed) {
+      this.emit('status', this.getSummary());
+    }
+  }
+
   addLog(type, message) {
+    if (this.isDestroyed) return;
     const entry = {
       streamId: this.id,
       time: new Date().toLocaleTimeString('es-DO', { hour12: false }),
@@ -223,13 +233,13 @@ export class StreamInstance extends EventEmitter {
   }
 
   _writeDonationFile() {
-    if (!this.config?.donation) return;
+    if (this.isDestroyed || !this.config?.donation) return;
     let content = '';
     if (this.config.donation.enabled) {
       const msgs = splitDonationMessages(this.config.donation.text);
       const currentMsg = msgs.length > 0 ? msgs[this.donationIndex % msgs.length] : '';
       const prof = QUALITY_PROFILES[this.config.quality] || QUALITY_PROFILES['1080p30'];
-      const isHoriz = this.config.mode === 'copy';
+      const isHoriz = ['copy', 'horizontal'].includes(this.config.mode);
       const maxChars = isHoriz ? prof.wrapChars16 : prof.wrapChars;
       content = wrapText(currentMsg, maxChars);
     }
@@ -240,11 +250,12 @@ export class StreamInstance extends EventEmitter {
 
   _startDonationRotation() {
     this._stopDonationRotation();
+    if (this.isDestroyed) return;
     const msgs = splitDonationMessages(this.config?.donation?.text);
     if (!this.config?.donation?.enabled || msgs.length <= 1) return;
     const sec = Math.max(12, Number(this.config.donation.rotateSec) || 25);
     this.donationRotateTimer = setInterval(() => {
-      if (!this.config?.donation?.enabled) return;
+      if (this.isDestroyed || !this.config?.donation?.enabled) return;
       this.donationIndex = (this.donationIndex + 1) % msgs.length;
       this._writeDonationFile();
     }, sec * 1000);
@@ -258,7 +269,7 @@ export class StreamInstance extends EventEmitter {
   }
 
   updateDonationLive(donationUpdates) {
-    if (!this.config) throw new Error('Transmisión sin configuración activa.');
+    if (!this.config || this.isDestroyed) throw new Error('Transmisión sin configuración activa.');
     const wantsEnabled = donationUpdates.enabled !== undefined
       ? Boolean(donationUpdates.enabled)
       : this.config.donation.enabled;
@@ -279,7 +290,7 @@ export class StreamInstance extends EventEmitter {
     } else {
       this.addLog('info', `💖 Texto de donación actualizado en vivo: "${this.config.donation.text}"`);
     }
-    this.emit('status', this.getSummary());
+    this._emitStatus();
     return this.config.donation;
   }
 
@@ -337,7 +348,7 @@ export class StreamInstance extends EventEmitter {
     this._writeDonationFile();
 
     this.status = 'checking';
-    this.emit('status', this.getSummary());
+    this._emitStatus();
     this.addLog('info', `[${this.id}] Verificando directo: ${this.config.sourceUrl}`);
 
     try {
@@ -354,10 +365,10 @@ export class StreamInstance extends EventEmitter {
       this.addLog('warn', `Aviso pre-flight: ${err.message}. Intentando ingesta...`);
     }
 
-    if (this.isManualStop) return;
+    if (this.isManualStop || this.isDestroyed) return;
 
     this.status = 'starting';
-    this.emit('status', this.getSummary());
+    this._emitStatus();
     await this._spawnPipeline();
   }
 
@@ -502,12 +513,12 @@ export class StreamInstance extends EventEmitter {
   }
 
   async _spawnPipeline() {
-    if (this.isManualStop) return;
+    if (this.isManualStop || this.isDestroyed) return;
 
     this.ffmpegStderrBuffer = [];
     const acc = this.accountInfo;
     const prof = QUALITY_PROFILES[this.config.quality];
-    const isHoriz = this.config.mode === 'copy';
+    const isHoriz = ['copy', 'horizontal'].includes(this.config.mode);
     const resStr = isHoriz ? `${prof.w16}x${prof.h16}` : `${prof.width}x${prof.height}`;
     let finalRtmpDestination = '';
 
@@ -527,7 +538,7 @@ export class StreamInstance extends EventEmitter {
             '--resolution', resStr
           ], { timeout: 35000 });
 
-          if (this.isManualStop) {
+          if (this.isManualStop || this.isDestroyed) {
             await this._cleanupTikTokSession();
             return;
           }
@@ -539,10 +550,10 @@ export class StreamInstance extends EventEmitter {
             this.addLog('info', `Enlace sala: ${this.tiktokSession.share_url}`);
           }
         } catch (err) {
-          if (this.isManualStop) return;
+          if (this.isManualStop || this.isDestroyed) return;
           this.status = 'error';
           this.addLog('error', `Error creando sala TikTok: ${err.message}`);
-          this.emit('status', this.getSummary());
+          this._emitStatus();
           return;
         }
       } else {
@@ -558,7 +569,7 @@ export class StreamInstance extends EventEmitter {
             '--resolution', resStr
           ], { timeout: 15000 });
 
-          if (this.isManualStop) {
+          if (this.isManualStop || this.isDestroyed) {
             await this._cleanupTikTokSession();
             return;
           }
@@ -574,7 +585,7 @@ export class StreamInstance extends EventEmitter {
       finalRtmpDestination = this._buildTargetUrl(acc.rtmpServer, acc.streamKey);
     }
 
-    if (this.isManualStop) {
+    if (this.isManualStop || this.isDestroyed) {
       await this._cleanupTikTokSession();
       return;
     }
@@ -605,47 +616,64 @@ export class StreamInstance extends EventEmitter {
     } catch (err) {
       this.status = 'error';
       this.addLog('error', `Fallo yt-dlp: ${err.message}`);
-      this.emit('status', this.getSummary());
+      this._emitStatus();
       return;
     }
 
-    // 2. Construir y lanzar FFmpeg
+    // 2. Construir y lanzar FFmpeg (stdout ignorado para evitar retener pipe innecesario)
     const ffmpegArgs = this._buildFfmpegArgs(finalRtmpDestination);
     this.addLog('info', `Codificador activo: ${this.stats.encoder} (${this.config.quality})`);
 
     try {
       this.ffmpegProc = spawn('ffmpeg', ffmpegArgs, {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'ignore', 'pipe']
       });
     } catch (err) {
       this.status = 'error';
       this.addLog('error', `Fallo ffmpeg: ${err.message}`);
-      this._killYtDlpTree('SIGKILL');
-      this.emit('status', this.getSummary());
+      this._cleanupProcesses();
+      this._emitStatus();
       return;
     }
 
-    this.ytdlpProc.stdout.pipe(this.ffmpegProc.stdin);
+    const ytdlpProcRef = this.ytdlpProc;
+    const ffmpegProcRef = this.ffmpegProc;
 
-    this.ytdlpProc.stdout.on('error', (err) => {
-      if (!this.isManualStop && !this.ytdlpFinishedCleanly) {
+    ytdlpProcRef.on('error', (err) => {
+      if (!this.isManualStop && !this.isDestroyed) {
+        this.addLog('error', `Error proceso yt-dlp: ${err.message}`);
+      }
+    });
+
+    ffmpegProcRef.on('error', (err) => {
+      if (!this.isManualStop && !this.isDestroyed) {
+        this.addLog('error', `Error proceso ffmpeg: ${err.message}`);
+      }
+    });
+
+    ytdlpProcRef.stdout.pipe(ffmpegProcRef.stdin);
+
+    ytdlpProcRef.stdout.on('error', (err) => {
+      if (!this.isManualStop && !this.isDestroyed && !this.ytdlpFinishedCleanly) {
         this.addLog('warn', `yt-dlp pipe: ${err.message}`);
       }
     });
 
-    this.ffmpegProc.stdin.on('error', (err) => {
-      if (!this.isManualStop && !this.ytdlpFinishedCleanly) {
+    ffmpegProcRef.stdin.on('error', (err) => {
+      if (!this.isManualStop && !this.isDestroyed && !this.ytdlpFinishedCleanly) {
         this.addLog('warn', `ffmpeg stdin: ${err.message}`);
       }
     });
 
-    this.ytdlpProc.stderr.on('data', (chunk) => {
+    ytdlpProcRef.stderr.on('data', (chunk) => {
+      if (this.isDestroyed) return;
       const msg = chunk.toString().trim();
       if (msg.includes('ERROR:')) this.addLog('error', `yt-dlp: ${msg}`);
       else if (msg.includes('WARNING:')) this.addLog('warn', `yt-dlp: ${msg}`);
     });
 
-    this.ffmpegProc.stderr.on('data', (chunk) => {
+    ffmpegProcRef.stderr.on('data', (chunk) => {
+      if (this.isDestroyed) return;
       const text = chunk.toString();
       const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
       for (const line of lines) {
@@ -667,7 +695,7 @@ export class StreamInstance extends EventEmitter {
           this._startDonationRotation();
           this._startWatchdog();
           this.addLog('info', `🟢 [${acc.name}] Emitiendo en vivo (${this.stats.encoder})`);
-          this.emit('status', this.getSummary());
+          this._emitStatus();
         }
 
         if (fpsMatch) this.stats.fps = parseFloat(fpsMatch[1]);
@@ -682,7 +710,9 @@ export class StreamInstance extends EventEmitter {
           this.stats.frames = curFrames;
         }
 
-        this.emit('stats', { id: this.id, stats: this.getSummary().stats });
+        if (!this.isDestroyed) {
+          this.emit('stats', { id: this.id, stats: this.getSummary().stats });
+        }
       } else {
         const clean = text.trim();
         if (clean.includes('Error') || clean.includes('failed') || clean.includes('refused')) {
@@ -691,7 +721,10 @@ export class StreamInstance extends EventEmitter {
       }
     });
 
-    this.ytdlpProc.on('close', (code) => {
+    ytdlpProcRef.on('close', (code) => {
+      this._destroyProcStreams(ytdlpProcRef);
+      if (this.ytdlpProc === ytdlpProcRef) this.ytdlpProc = null;
+      if (this.isDestroyed) return;
       if (code === 0) {
         this.ytdlpFinishedCleanly = true;
         this.addLog('info', '🏁 El directo de origen ha finalizado.');
@@ -700,9 +733,19 @@ export class StreamInstance extends EventEmitter {
       }
     });
 
-    this.ffmpegProc.on('close', (code) => {
+    ffmpegProcRef.on('close', (code) => {
+      this._destroyProcStreams(ffmpegProcRef);
+      if (this.ffmpegProc === ffmpegProcRef) this.ffmpegProc = null;
       this._handleProcessExit(code);
     });
+  }
+
+  _destroyProcStreams(proc) {
+    if (!proc) return;
+    try { proc.stdout?.unpipe?.(); } catch {}
+    try { proc.stdin?.destroy?.(); } catch {}
+    try { proc.stdout?.destroy?.(); } catch {}
+    try { proc.stderr?.destroy?.(); } catch {}
   }
 
   _killYtDlpTree(sig = 'SIGTERM') {
@@ -718,9 +761,11 @@ export class StreamInstance extends EventEmitter {
   }
 
   _cleanupProcesses() {
+    this._destroyProcStreams(this.ytdlpProc);
     this._killYtDlpTree('SIGKILL');
     this.ytdlpProc = null;
     if (this.ffmpegProc) {
+      this._destroyProcStreams(this.ffmpegProc);
       try { this.ffmpegProc.kill('SIGKILL'); } catch {}
       this.ffmpegProc = null;
     }
@@ -778,12 +823,48 @@ export class StreamInstance extends EventEmitter {
     }
   }
 
+  _notifyExitWaiters() {
+    if (this._exitNotifyResolvers.length > 0) {
+      const list = this._exitNotifyResolvers.splice(0);
+      for (const resolve of list) {
+        try { resolve(); } catch {}
+      }
+    }
+  }
+
+  _waitForExit(timeoutMs = 1200) {
+    if (!this.ffmpegProc) return Promise.resolve();
+    return new Promise((resolve) => {
+      let timer = null;
+      const done = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        resolve();
+      };
+      this._exitNotifyResolvers.push(done);
+      timer = setTimeout(() => {
+        const idx = this._exitNotifyResolvers.indexOf(done);
+        if (idx !== -1) this._exitNotifyResolvers.splice(idx, 1);
+        done();
+      }, timeoutMs);
+    });
+  }
+
   async _handleProcessExit(code) {
     this._stopWatchdog();
     this._stopDonationRotation();
     if (this.stopForceTimer) {
       clearTimeout(this.stopForceTimer);
       this.stopForceTimer = null;
+    }
+
+    if (this.isDestroyed) {
+      this._cleanupProcesses();
+      await this._cleanupTikTokSession();
+      this._notifyExitWaiters();
+      return;
     }
 
     if (this.isManualStop) {
@@ -793,7 +874,8 @@ export class StreamInstance extends EventEmitter {
       this._cleanupProcesses();
       await this._cleanupTikTokSession();
       this.addLog('info', 'Transmisión detenida manualmente.');
-      this.emit('status', this.getSummary());
+      this._emitStatus();
+      this._notifyExitWaiters();
       return;
     }
 
@@ -804,7 +886,8 @@ export class StreamInstance extends EventEmitter {
       this._cleanupProcesses();
       await this._cleanupTikTokSession();
       this.addLog('info', '✅ Directo terminado limpiamente por el creador.');
-      this.emit('status', this.getSummary());
+      this._emitStatus();
+      this._notifyExitWaiters();
       return;
     }
 
@@ -820,6 +903,7 @@ export class StreamInstance extends EventEmitter {
       this.addLog('warn', 'VAAPI falló al inicializar para este stream; cambiando automáticamente a libx264 (CPU)...');
       this._cleanupProcesses();
       await this._spawnPipeline();
+      this._notifyExitWaiters();
       return;
     }
 
@@ -849,7 +933,8 @@ export class StreamInstance extends EventEmitter {
         this.startedAt = null;
         this._resetStats();
         this.addLog('error', `Reconexión detenida tras ${this.maxEarlyRetries} fallos tempranos consecutivos (protege tu cuenta/cuota).`);
-        this.emit('status', this.getSummary());
+        this._emitStatus();
+        this._notifyExitWaiters();
         return;
       }
 
@@ -860,23 +945,24 @@ export class StreamInstance extends EventEmitter {
 
       this.status = 'starting';
       this.addLog('warn', `Reconexión automática en ${backoffDelay}s (intento ${this.consecutiveEarlyFailures}/${this.maxEarlyRetries})...`);
-      this.emit('status', this.getSummary());
+      this._emitStatus();
 
       this.reconnectTimeout = setTimeout(async () => {
-        if (this.isManualStop || !this.config) return;
+        if (this.isManualStop || this.isDestroyed || !this.config) return;
         try {
           const liveStatus = await this._probeLiveStatus(this.config.sourceUrl);
+          if (this.isManualStop || this.isDestroyed) return;
           if (['not_live', 'was_live', 'is_upcoming', 'post_live'].includes(liveStatus)) {
             this.status = 'finished';
             this.startedAt = null;
             this._resetStats();
             this.addLog('info', `✅ El directo origen ya no está en vivo (${liveStatus}). Emisión cerrada.`);
-            this.emit('status', this.getSummary());
+            this._emitStatus();
             return;
           }
         } catch {}
 
-        if (!this.isManualStop && this.config) {
+        if (!this.isManualStop && !this.isDestroyed && this.config) {
           this.addLog('info', 'Reconectando...');
           await this._spawnPipeline();
         }
@@ -885,47 +971,83 @@ export class StreamInstance extends EventEmitter {
       this.status = 'idle';
       this.startedAt = null;
       this._resetStats();
-      this.emit('status', this.getSummary());
+      this._emitStatus();
     }
+    this._notifyExitWaiters();
   }
 
   async stop() {
-    this.isManualStop = true;
+    if (this._stopPromise) return this._stopPromise;
+
+    this._stopPromise = (async () => {
+      this.isManualStop = true;
+      this._stopWatchdog();
+      this._stopDonationRotation();
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = null;
+      }
+      if (this.stopForceTimer) {
+        clearTimeout(this.stopForceTimer);
+        this.stopForceTimer = null;
+      }
+
+      if (['idle', 'finished', 'error'].includes(this.status) && !this.ffmpegProc && !this.ytdlpProc) {
+        this._cleanupProcesses();
+        await this._cleanupTikTokSession();
+        return { message: 'Stream inactivo.' };
+      }
+
+      if (!this.isDestroyed) {
+        this.status = 'stopping';
+        this.addLog('info', 'Deteniendo transmisión...');
+        this._emitStatus();
+      }
+
+      if (this.ffmpegProc) {
+        try { this.ffmpegProc.kill('SIGTERM'); } catch {}
+      }
+      this._killYtDlpTree('SIGTERM');
+
+      const waitExit = this._waitForExit(1200);
+      await Promise.all([waitExit, this._cleanupTikTokSession()]);
+
+      // Si aún sigue vivo tras 1.2s, forzar limpieza completa
+      this._cleanupProcesses();
+      if (!this.isDestroyed && this.status === 'stopping') {
+        this.status = 'idle';
+        this.startedAt = null;
+        this._resetStats();
+        this._emitStatus();
+      }
+      this._notifyExitWaiters();
+      return { message: 'Transmisión detenida.' };
+    })();
+
+    try {
+      return await this._stopPromise;
+    } finally {
+      this._stopPromise = null;
+    }
+  }
+
+  async destroy() {
+    this.isDestroyed = true;
+    await this.stop();
     this._stopWatchdog();
     this._stopDonationRotation();
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;
     }
-
-    if (['idle', 'finished'].includes(this.status)) {
-      this._cleanupProcesses();
-      await this._cleanupTikTokSession();
-      return { message: 'Stream inactivo.' };
+    if (this.stopForceTimer) {
+      clearTimeout(this.stopForceTimer);
+      this.stopForceTimer = null;
     }
-
-    this.status = 'stopping';
-    this.addLog('info', 'Deteniendo transmisión...');
-    this.emit('status', this.getSummary());
-
-    if (this.ffmpegProc) {
-      try { this.ffmpegProc.kill('SIGTERM'); } catch {}
-    }
-    this._killYtDlpTree('SIGTERM');
-
-    await this._cleanupTikTokSession();
-
-    this.stopForceTimer = setTimeout(() => {
-      this._cleanupProcesses();
-      if (this.status === 'stopping') {
-        this.status = 'idle';
-        this.startedAt = null;
-        this._resetStats();
-        this.emit('status', this.getSummary());
-      }
-    }, 1200);
-
-    return { message: 'Transmisión detenida.' };
+    this._cleanupProcesses();
+    try { fs.unlinkSync(this.donationFilePath); } catch {}
+    try { fs.unlinkSync(`${this.donationFilePath}.tmp`); } catch {}
+    this.removeAllListeners();
   }
 }
 
@@ -945,6 +1067,25 @@ export class StreamManager extends EventEmitter {
       const res = JSON.parse(stdout.trim() || '{}');
       if (Array.isArray(res.cleaned) && res.cleaned.length > 0) {
         console.log(`[StreamManager] Sesiones huérfanas limpiadas al arranque: ${res.cleaned.join(', ')}`);
+      }
+    } catch {}
+
+    // Limpiar archivos residuales en donations/ que no correspondan a slots activos
+    try {
+      if (fs.existsSync(DONATIONS_DIR)) {
+        const cleanedFiles = [];
+        for (const entry of fs.readdirSync(DONATIONS_DIR)) {
+          const id = entry.replace(/\.txt(\.tmp)?$/, '');
+          if (!this.streams.has(id)) {
+            try {
+              fs.unlinkSync(path.join(DONATIONS_DIR, entry));
+              cleanedFiles.push(entry);
+            } catch {}
+          }
+        }
+        if (cleanedFiles.length > 0) {
+          console.log(`[StreamManager] Archivos residuales en donations/ eliminados: ${cleanedFiles.join(', ')}`);
+        }
       }
     } catch {}
   }
@@ -995,18 +1136,30 @@ export class StreamManager extends EventEmitter {
     });
     instance.accountInfo = account;
 
-    instance.on('status', (summary) => this.emit('stream_status', summary));
-    instance.on('stats', (payload) => this.emit('stream_stats', payload));
-    instance.on('log', (entry) => this.emit('stream_log', entry));
+    instance.on('status', (summary) => {
+      if (!instance.isDestroyed && this.streams.has(id)) {
+        this.emit('stream_status', summary);
+      }
+    });
+    instance.on('stats', (payload) => {
+      if (!instance.isDestroyed && this.streams.has(id)) {
+        this.emit('stream_stats', payload);
+      }
+    });
+    instance.on('log', (entry) => {
+      if (!instance.isDestroyed && this.streams.has(id)) {
+        this.emit('stream_log', entry);
+      }
+    });
 
     this.streams.set(id, instance);
 
     try {
       await instance.start(config, account);
     } catch (err) {
-      try { fs.unlinkSync(instance.donationFilePath); } catch {}
       this.streams.delete(id);
       this.emit('stream_removed', { id });
+      await instance.destroy();
       throw err;
     }
     return instance.getSummary();
@@ -1027,12 +1180,11 @@ export class StreamManager extends EventEmitter {
   async removeStream(id) {
     const s = this.streams.get(id);
     if (!s) throw new Error('Transmisión no encontrada.');
-    if (['checking', 'starting', 'running', 'stopping'].includes(s.status)) {
-      await s.stop();
-    }
-    try { fs.unlinkSync(s.donationFilePath); } catch {}
+    // Bloquear de inmediato cualquier evento futuro (evita tarjetas fantasma en SSE)
+    s.isDestroyed = true;
     this.streams.delete(id);
     this.emit('stream_removed', { id });
+    await s.destroy();
     return { removed: true, id };
   }
 
