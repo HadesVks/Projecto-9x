@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import util from 'util';
+import { isTikTokLiveUrl, lookupTikTokRoom } from './tiktok_scraper.js';
 
 const execFileAsync = util.promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -145,6 +146,8 @@ export class StreamInstance extends EventEmitter {
     this.ytdlpProc = null;
     this.ffmpegProc = null;
     this.tiktokSession = null;
+    this.resolvedPullUrl = '';
+    this.sourceDimensions = { width: 0, height: 0 };
     this.startedAt = null;
     this.reconnectTimeout = null;
     this.isManualStop = false;
@@ -348,6 +351,8 @@ export class StreamInstance extends EventEmitter {
     this._writeDonationFile();
 
     this.status = 'checking';
+    this.resolvedPullUrl = '';
+    this.sourceDimensions = { width: 0, height: 0 };
     this._emitStatus();
     this.addLog('info', `[${this.id}] Verificando directo: ${this.config.sourceUrl}`);
 
@@ -373,6 +378,28 @@ export class StreamInstance extends EventEmitter {
   }
 
   async _probeLiveStatus(url) {
+    if (isTikTokLiveUrl(url)) {
+      const cookiePath = this.accountInfo?.cookiesAbsPath || '';
+      const room = await lookupTikTokRoom(url, { cookiePath, timeoutMs: 16000 });
+      if (!room.success && room.blocked) {
+        throw new Error(room.error || 'TikTok devolvió verificación temporal');
+      }
+      if (!room.is_live) {
+        this.resolvedPullUrl = '';
+        this.sourceDimensions = { width: 0, height: 0 };
+        return 'not_live';
+      }
+      this.resolvedPullUrl = room.pull_flv_url || room.pull_hls_url || '';
+      this.sourceDimensions = {
+        width: Number(room.width) || 0,
+        height: Number(room.height) || 0
+      };
+      if (!this.resolvedPullUrl) {
+        throw new Error('Sala en vivo encontrada sin flujo de video legible');
+      }
+      return 'is_live';
+    }
+
     const { stdout } = await execFileAsync('yt-dlp', [
       '--no-playlist',
       '--js-runtimes', 'node',
@@ -402,7 +429,17 @@ export class StreamInstance extends EventEmitter {
     if (useVaapi) {
       args.push('-hwaccel', 'vaapi', '-hwaccel_device', VAAPI_DEVICE);
     }
-    args.push('-fflags', '+genpts+discardcorrupt', '-re', '-i', 'pipe:0');
+
+    const directInputUrl = this.resolvedPullUrl || '';
+    if (directInputUrl) {
+      args.push('-rw_timeout', '15000000');
+      if (!directInputUrl.includes('.m3u8')) {
+        args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '3');
+      }
+      args.push('-fflags', '+genpts+discardcorrupt', '-re', '-i', directInputUrl);
+    } else {
+      args.push('-fflags', '+genpts+discardcorrupt', '-re', '-i', 'pipe:0');
+    }
 
     if (isPureCopy) {
       args.push(
@@ -425,13 +462,24 @@ export class StreamInstance extends EventEmitter {
 
     let filterGraph = '';
     if (effectiveMode === 'vertical_blur') {
-      filterGraph =
-        `[0:v]split=2[bg_src][fg_src];` +
-        `[bg_src]scale=180:320:force_original_aspect_ratio=increase:flags=fast_bilinear,` +
-        `crop=180:320:(in_w-180)/2:(in_h-320)/2,boxblur=6:2,` +
-        `scale=${targetW}:${targetH}:flags=fast_bilinear[bg];` +
-        `[fg_src]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear[fg];` +
-        `[bg][fg]overlay=(W-w)/2:(H-h)/2`;
+      const isAlreadyPortrait =
+        this.sourceDimensions &&
+        this.sourceDimensions.width > 0 &&
+        this.sourceDimensions.height > 0 &&
+        (this.sourceDimensions.width / this.sourceDimensions.height) <= 0.72;
+      if (isAlreadyPortrait) {
+        filterGraph =
+          `[0:v]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear,` +
+          `pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+      } else {
+        filterGraph =
+          `[0:v]split=2[bg_src][fg_src];` +
+          `[bg_src]scale=180:320:force_original_aspect_ratio=increase:flags=fast_bilinear,` +
+          `crop=180:320:(in_w-180)/2:(in_h-320)/2,boxblur=6:2,` +
+          `scale=${targetW}:${targetH}:flags=fast_bilinear[bg];` +
+          `[fg_src]scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease:flags=bilinear[fg];` +
+          `[bg][fg]overlay=(W-w)/2:(H-h)/2`;
+      }
     } else if (effectiveMode === 'vertical_crop') {
       filterGraph =
         `[0:v]crop=w='min(iw,ih*9/16)':h='min(ih,iw*16/9)',scale=${targetW}:${targetH}:flags=bilinear`;
@@ -516,6 +564,27 @@ export class StreamInstance extends EventEmitter {
     if (this.isManualStop || this.isDestroyed) return;
 
     this.ffmpegStderrBuffer = [];
+    this.ytdlpFinishedCleanly = false;
+    const isTikTokSource = isTikTokLiveUrl(this.config.sourceUrl);
+    if (isTikTokSource && !this.resolvedPullUrl) {
+      try {
+        const st = await this._probeLiveStatus(this.config.sourceUrl);
+        if (st !== 'is_live' || !this.resolvedPullUrl) {
+          this.status = 'finished';
+          this.startedAt = null;
+          this._resetStats();
+          this.addLog('info', '🏁 El directo origen de TikTok ya finalizó.');
+          this._emitStatus();
+          return;
+        }
+      } catch (err) {
+        this.status = 'error';
+        this.addLog('error', `Error resolviendo flujo TikTok: ${err.message}`);
+        this._emitStatus();
+        return;
+      }
+    }
+
     const acc = this.accountInfo;
     const prof = QUALITY_PROFILES[this.config.quality];
     const isHoriz = ['copy', 'horizontal'].includes(this.config.mode);
@@ -590,43 +659,50 @@ export class StreamInstance extends EventEmitter {
       return;
     }
 
-    // 1. Spawn yt-dlp con tope de resolución (ahorra CPU decodificando 4K/AV1) en grupo aislado
-    const maxH = prof.h16;
-    const formatExpr = `best[height<=${maxH}][vcodec^=avc1]/bestvideo[height<=${maxH}][vcodec!*=av01]+bestaudio/best[height<=${maxH}]/best`;
-    const ytdlpArgs = [
-      '--no-playlist',
-      '--js-runtimes', 'node',
-      '--extractor-args', 'youtube:player_client=ios,android,tv,mweb',
-      '--hls-use-mpegts',
-      '--retries', '10',
-      '--fragment-retries', '10',
-      '--retry-sleep', '5',
-      '-o', '-',
-      '-f', formatExpr,
-      '--no-part',
-      '--buffer-size', '16k',
-      this.config.sourceUrl
-    ];
+    const useDirectTikTokPull = Boolean(isTikTokSource && this.resolvedPullUrl);
+    if (useDirectTikTokPull) {
+      this.ytdlpProc = null;
+      this.addLog('info', 'Ingesta directa desde TikTok Live CDN activada.');
+    } else {
+      // 1. Spawn yt-dlp con tope de resolución (ahorra CPU decodificando 4K/AV1) en grupo aislado
+      const maxH = prof.h16;
+      const formatExpr = `best[height<=${maxH}][vcodec^=avc1]/bestvideo[height<=${maxH}][vcodec!*=av01]+bestaudio/best[height<=${maxH}]/best`;
+      const ytdlpArgs = [
+        '--no-playlist',
+        '--js-runtimes', 'node',
+        '--extractor-args', 'youtube:player_client=ios,android,tv,mweb',
+        '--hls-use-mpegts',
+        '--retries', '10',
+        '--fragment-retries', '10',
+        '--retry-sleep', '5',
+        '-o', '-',
+        '-f', formatExpr,
+        '--no-part',
+        '--buffer-size', '16k',
+        this.config.sourceUrl
+      ];
 
-    try {
-      this.ytdlpProc = spawn('yt-dlp', ytdlpArgs, {
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
-    } catch (err) {
-      this.status = 'error';
-      this.addLog('error', `Fallo yt-dlp: ${err.message}`);
-      this._emitStatus();
-      return;
+      try {
+        this.ytdlpProc = spawn('yt-dlp', ytdlpArgs, {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+      } catch (err) {
+        this.status = 'error';
+        this.addLog('error', `Fallo yt-dlp: ${err.message}`);
+        this._emitStatus();
+        return;
+      }
     }
 
     // 2. Construir y lanzar FFmpeg (stdout ignorado para evitar retener pipe innecesario)
     const ffmpegArgs = this._buildFfmpegArgs(finalRtmpDestination);
+    this.resolvedPullUrl = '';
     this.addLog('info', `Codificador activo: ${this.stats.encoder} (${this.config.quality})`);
 
     try {
       this.ffmpegProc = spawn('ffmpeg', ffmpegArgs, {
-        stdio: ['pipe', 'ignore', 'pipe']
+        stdio: [useDirectTikTokPull ? 'ignore' : 'pipe', 'ignore', 'pipe']
       });
     } catch (err) {
       this.status = 'error';
@@ -639,38 +715,52 @@ export class StreamInstance extends EventEmitter {
     const ytdlpProcRef = this.ytdlpProc;
     const ffmpegProcRef = this.ffmpegProc;
 
-    ytdlpProcRef.on('error', (err) => {
-      if (!this.isManualStop && !this.isDestroyed) {
-        this.addLog('error', `Error proceso yt-dlp: ${err.message}`);
-      }
-    });
-
     ffmpegProcRef.on('error', (err) => {
       if (!this.isManualStop && !this.isDestroyed) {
         this.addLog('error', `Error proceso ffmpeg: ${err.message}`);
       }
     });
 
-    ytdlpProcRef.stdout.pipe(ffmpegProcRef.stdin);
+    if (ytdlpProcRef && ffmpegProcRef.stdin) {
+      ytdlpProcRef.on('error', (err) => {
+        if (!this.isManualStop && !this.isDestroyed) {
+          this.addLog('error', `Error proceso yt-dlp: ${err.message}`);
+        }
+      });
 
-    ytdlpProcRef.stdout.on('error', (err) => {
-      if (!this.isManualStop && !this.isDestroyed && !this.ytdlpFinishedCleanly) {
-        this.addLog('warn', `yt-dlp pipe: ${err.message}`);
-      }
-    });
+      ytdlpProcRef.stdout.pipe(ffmpegProcRef.stdin);
 
-    ffmpegProcRef.stdin.on('error', (err) => {
-      if (!this.isManualStop && !this.isDestroyed && !this.ytdlpFinishedCleanly) {
-        this.addLog('warn', `ffmpeg stdin: ${err.message}`);
-      }
-    });
+      ytdlpProcRef.stdout.on('error', (err) => {
+        if (!this.isManualStop && !this.isDestroyed && !this.ytdlpFinishedCleanly) {
+          this.addLog('warn', `yt-dlp pipe: ${err.message}`);
+        }
+      });
 
-    ytdlpProcRef.stderr.on('data', (chunk) => {
-      if (this.isDestroyed) return;
-      const msg = chunk.toString().trim();
-      if (msg.includes('ERROR:')) this.addLog('error', `yt-dlp: ${msg}`);
-      else if (msg.includes('WARNING:')) this.addLog('warn', `yt-dlp: ${msg}`);
-    });
+      ffmpegProcRef.stdin.on('error', (err) => {
+        if (!this.isManualStop && !this.isDestroyed && !this.ytdlpFinishedCleanly) {
+          this.addLog('warn', `ffmpeg stdin: ${err.message}`);
+        }
+      });
+
+      ytdlpProcRef.stderr.on('data', (chunk) => {
+        if (this.isDestroyed) return;
+        const msg = chunk.toString().trim();
+        if (msg.includes('ERROR:')) this.addLog('error', `yt-dlp: ${msg}`);
+        else if (msg.includes('WARNING:')) this.addLog('warn', `yt-dlp: ${msg}`);
+      });
+
+      ytdlpProcRef.on('close', (code) => {
+        this._destroyProcStreams(ytdlpProcRef);
+        if (this.ytdlpProc === ytdlpProcRef) this.ytdlpProc = null;
+        if (this.isDestroyed) return;
+        if (code === 0) {
+          this.ytdlpFinishedCleanly = true;
+          this.addLog('info', '🏁 El directo de origen ha finalizado.');
+        } else if (!this.isManualStop) {
+          this.addLog('warn', `yt-dlp cerró con código ${code}`);
+        }
+      });
+    }
 
     ffmpegProcRef.stderr.on('data', (chunk) => {
       if (this.isDestroyed) return;
@@ -718,18 +808,6 @@ export class StreamInstance extends EventEmitter {
         if (clean.includes('Error') || clean.includes('failed') || clean.includes('refused')) {
           this.addLog('error', `ffmpeg: ${clean}`);
         }
-      }
-    });
-
-    ytdlpProcRef.on('close', (code) => {
-      this._destroyProcStreams(ytdlpProcRef);
-      if (this.ytdlpProc === ytdlpProcRef) this.ytdlpProc = null;
-      if (this.isDestroyed) return;
-      if (code === 0) {
-        this.ytdlpFinishedCleanly = true;
-        this.addLog('info', '🏁 El directo de origen ha finalizado.');
-      } else if (!this.isManualStop) {
-        this.addLog('warn', `yt-dlp cerró con código ${code}`);
       }
     });
 
@@ -889,6 +967,31 @@ export class StreamInstance extends EventEmitter {
       this._emitStatus();
       this._notifyExitWaiters();
       return;
+    }
+
+    if (code === 0 && !this.ytdlpFinishedCleanly && this.config && isTikTokLiveUrl(this.config.sourceUrl)) {
+      this.resolvedPullUrl = '';
+      let tkStatus = 'unknown';
+      try {
+        tkStatus = await this._probeLiveStatus(this.config.sourceUrl);
+      } catch {}
+      if (this.isManualStop || this.isDestroyed) {
+        this._cleanupProcesses();
+        await this._cleanupTikTokSession();
+        this._notifyExitWaiters();
+        return;
+      }
+      if (['not_live', 'was_live', 'is_upcoming', 'post_live'].includes(tkStatus)) {
+        this.status = 'finished';
+        this.startedAt = null;
+        this._resetStats();
+        this._cleanupProcesses();
+        await this._cleanupTikTokSession();
+        this.addLog('info', '✅ Directo TikTok terminado limpiamente por el creador.');
+        this._emitStatus();
+        this._notifyExitWaiters();
+        return;
+      }
     }
 
     // Fallback automático a CPU si VAAPI falló antes de empezar a emitir

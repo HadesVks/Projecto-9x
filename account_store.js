@@ -67,6 +67,7 @@ export class AccountStore {
       savedPresets: parsed.savedPresets || DEFAULT_PRESETS,
       accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
       autoMonitors: Array.isArray(parsed.autoMonitors) ? parsed.autoMonitors : [],
+      radarCreators: Array.isArray(parsed.radarCreators) ? parsed.radarCreators : [],
       legacyMigrated: Boolean(parsed.legacyMigrated),
       security: {
         pinSalt: parsed.security?.pinSalt || '',
@@ -373,6 +374,67 @@ export class AccountStore {
     this.data.autoMonitors.splice(idx, 1);
     this._save();
     return { deleted: true, id };
+  }
+
+  _normalizeRadarHandle(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return '';
+    let candidate = text;
+    if (/^https?:\/\//i.test(text)) {
+      try {
+        const parsed = new URL(text);
+        if (!parsed.hostname.toLowerCase().endsWith('tiktok.com')) return '';
+        const first = parsed.pathname.split('/').filter(Boolean)[0] || '';
+        if (!first.startsWith('@')) return '';
+        candidate = first.slice(1);
+      } catch {
+        return '';
+      }
+    } else if (text.startsWith('@')) {
+      candidate = text.slice(1);
+    }
+    candidate = candidate.trim().toLowerCase();
+    return /^[a-z0-9._-]{1,64}$/.test(candidate) ? candidate : '';
+  }
+
+  listRadar() {
+    return (this.data.radarCreators || []).map((r) => ({ ...r }));
+  }
+
+  addRadarCreator({ handle, note = '' }) {
+    const clean = this._normalizeRadarHandle(handle);
+    if (!clean) throw new Error('Handle de TikTok inválido (usa @usuario o URL de TikTok).');
+    if (!Array.isArray(this.data.radarCreators)) this.data.radarCreators = [];
+    const existing = this.data.radarCreators.find((r) => r.handle.toLowerCase() === clean);
+    if (existing) {
+      if (note && note.trim()) {
+        existing.note = note.trim().slice(0, 80);
+        this._save();
+      }
+      return { ...existing };
+    }
+    if (this.data.radarCreators.length >= 60) {
+      throw new Error('Límite de 60 creadores en Radar alcanzado.');
+    }
+    const entry = {
+      handle: clean,
+      note: String(note || '').trim().slice(0, 80),
+      addedAt: new Date().toISOString()
+    };
+    this.data.radarCreators.push(entry);
+    this._save();
+    return { ...entry };
+  }
+
+  removeRadarCreator(handle) {
+    const clean = this._normalizeRadarHandle(handle);
+    if (!clean) throw new Error('Handle inválido.');
+    if (!Array.isArray(this.data.radarCreators)) this.data.radarCreators = [];
+    const idx = this.data.radarCreators.findIndex((r) => r.handle.toLowerCase() === clean);
+    if (idx === -1) throw new Error('Creador no encontrado en el Radar.');
+    this.data.radarCreators.splice(idx, 1);
+    this._save();
+    return { deleted: true, handle: clean };
   }
 
   async verifyTikTokAccount(id) {

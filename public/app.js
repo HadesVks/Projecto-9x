@@ -17,7 +17,16 @@ const state = {
     envLocked: false
   },
   bootstrapped: false,
-  sse: null
+  sse: null,
+  radar: [],
+  discover: {
+    lastKeyword: '',
+    lastMinViewers: 0,
+    lastMode: 'search',
+    items: [],
+    radarLoadedOnce: false,
+    loading: false
+  }
 };
 
 const dom = {
@@ -26,6 +35,7 @@ const dom = {
   quotaPill: document.getElementById('quotaPill'),
   sysResourcesPill: document.getElementById('sysResourcesPill'),
   pinBtn: document.getElementById('pinBtn'),
+  radarCount: document.getElementById('radarCount'),
   monitorsCount: document.getElementById('monitorsCount'),
   accountsCount: document.getElementById('accountsCount'),
   tabBtns: document.querySelectorAll('.tab-btn'),
@@ -97,7 +107,24 @@ const dom = {
   pinSaveBtn: document.getElementById('pinSaveBtn'),
   pinDisableBtn: document.getElementById('pinDisableBtn'),
   pinLogoutBtn: document.getElementById('pinLogoutBtn'),
-  pinCloseModalBtn: document.getElementById('pinCloseModalBtn')
+  pinCloseModalBtn: document.getElementById('pinCloseModalBtn'),
+
+  // Discover & Radar
+  discoverKeyword: document.getElementById('discoverKeyword'),
+  discoverMinViewers: document.getElementById('discoverMinViewers'),
+  discoverSearchBtn: document.getElementById('discoverSearchBtn'),
+  discoverLookupBtn: document.getElementById('discoverLookupBtn'),
+  discoverRefreshBtn: document.getElementById('discoverRefreshBtn'),
+  discoverPresets: document.getElementById('discoverPresets'),
+  discoverStatusBanner: document.getElementById('discoverStatusBanner'),
+  radarHandleInput: document.getElementById('radarHandleInput'),
+  radarNoteInput: document.getElementById('radarNoteInput'),
+  radarAddBtn: document.getElementById('radarAddBtn'),
+  radarCheckBtn: document.getElementById('radarCheckBtn'),
+  radarList: document.getElementById('radarList'),
+  discoverResultsTitle: document.getElementById('discoverResultsTitle'),
+  discoverCacheHint: document.getElementById('discoverCacheHint'),
+  discoverResultsGrid: document.getElementById('discoverResultsGrid')
 };
 
 function esc(value) {
@@ -186,12 +213,18 @@ async function apiJson(url, options = {}) {
 }
 
 // --- Tabs ---
+function switchTab(target) {
+  dom.tabBtns.forEach((b) => b.classList.toggle('active', b.dataset.tab === target));
+  dom.tabPanels.forEach((p) => p.classList.toggle('active', p.id === `tab-${target}`));
+  if (target === 'discover' && state.bootstrapped && !state.discover.radarLoadedOnce && state.radar.length > 0) {
+    loadRadarStatus(false);
+  }
+}
+
 function initTabs() {
   dom.tabBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
-      const target = btn.dataset.tab;
-      dom.tabBtns.forEach((b) => b.classList.toggle('active', b === btn));
-      dom.tabPanels.forEach((p) => p.classList.toggle('active', p.id === `tab-${target}`));
+      switchTab(btn.dataset.tab);
     });
   });
 }
@@ -1351,6 +1384,50 @@ function bindEvents() {
       if (e.target === dom.pinConfigModal) closePinConfigModal();
     });
   }
+
+  // Discover & Radar Events
+  if (dom.discoverSearchBtn) {
+    dom.discoverSearchBtn.addEventListener('click', () => handleDiscoverSearch(false));
+  }
+  if (dom.discoverLookupBtn) {
+    dom.discoverLookupBtn.addEventListener('click', () => handleDiscoverLookup());
+  }
+  if (dom.discoverRefreshBtn) {
+    dom.discoverRefreshBtn.addEventListener('click', () => handleDiscoverSearch(true));
+  }
+  if (dom.discoverKeyword) {
+    dom.discoverKeyword.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = dom.discoverKeyword.value.trim();
+        if (val.startsWith('@') || val.includes('tiktok.com/@')) handleDiscoverLookup(val);
+        else handleDiscoverSearch(false);
+      }
+    });
+  }
+  if (dom.discoverPresets) {
+    dom.discoverPresets.addEventListener('click', (e) => {
+      const chip = e.target.closest('.preset-chip');
+      if (!chip) return;
+      const kw = chip.dataset.keyword || '';
+      if (!kw) return;
+      dom.discoverPresets.querySelectorAll('.preset-chip').forEach((c) => c.classList.toggle('active', c === chip));
+      dom.discoverKeyword.value = kw;
+      handleDiscoverSearch(false, kw);
+    });
+  }
+  if (dom.radarAddBtn) {
+    dom.radarAddBtn.addEventListener('click', handleAddRadarCreator);
+  }
+  if (dom.radarCheckBtn) {
+    dom.radarCheckBtn.addEventListener('click', () => loadRadarStatus(true));
+  }
+  if (dom.radarList) {
+    dom.radarList.addEventListener('click', handleDiscoverCardAction);
+  }
+  if (dom.discoverResultsGrid) {
+    dom.discoverResultsGrid.addEventListener('click', handleDiscoverCardAction);
+  }
 }
 
 // --- SSE Connection ---
@@ -1443,6 +1520,345 @@ function connectSSE() {
   });
 }
 
+// --- Discovery & Radar TikTok Live ---
+function formatViewers(count) {
+  const n = Number(count) || 0;
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
+}
+
+function safeHttpImg(url) {
+  const text = String(url || '').trim();
+  return /^https?:\/\//i.test(text) ? text : '';
+}
+
+function setDiscoverBanner(message, type = 'info') {
+  if (!dom.discoverStatusBanner) return;
+  if (!message) {
+    dom.discoverStatusBanner.style.display = 'none';
+    dom.discoverStatusBanner.textContent = '';
+    return;
+  }
+  dom.discoverStatusBanner.className = `discover-banner ${type}`;
+  dom.discoverStatusBanner.textContent = message;
+  dom.discoverStatusBanner.style.display = 'block';
+}
+
+function isInRadar(handle) {
+  const clean = String(handle || '').toLowerCase();
+  return state.radar.some((r) => String(r.handle || '').toLowerCase() === clean);
+}
+
+function syncRadarList(rawRadar) {
+  const prevMap = new Map();
+  for (const r of state.radar || []) {
+    prevMap.set(String(r.handle || '').toLowerCase(), r);
+  }
+  for (const d of state.discover.items || []) {
+    const k = String(d.handle || '').toLowerCase();
+    if (k && !prevMap.has(k)) prevMap.set(k, d);
+  }
+  state.radar = (rawRadar || []).map((entry) => {
+    const k = String(entry.handle || '').toLowerCase();
+    const prev = prevMap.get(k);
+    return prev ? { ...prev, ...entry } : entry;
+  });
+}
+
+function renderRadarList() {
+  if (dom.radarCount) dom.radarCount.textContent = String(state.radar.length);
+  if (!dom.radarList) return;
+
+  if (state.radar.length === 0) {
+    dom.radarList.innerHTML = '<div class="empty-state-box">No sigues creadores aún. Agrega un @usuario arriba o pulsa ⭐ Seguir en cualquier resultado.</div>';
+    return;
+  }
+
+  dom.radarList.innerHTML = state.radar.map((item) => {
+    const handle = esc(item.handle);
+    const liveUrl = esc(item.live_url || `https://www.tiktok.com/@${item.handle}/live`);
+    const title = esc(item.title || item.note || 'Sin título');
+    const isLive = Boolean(item.is_live);
+    const badge = isLive
+      ? `<span class="radar-badge-live">🔴 EN VIVO • ${formatViewers(item.viewers)}</span>`
+      : `<span class="radar-badge-off">${state.discover.radarLoadedOnce ? '⚫ Offline' : '⏳ Sin comprobar'}</span>`;
+
+    return `
+      <div class="radar-item ${isLive ? 'is-live' : ''}">
+        <div class="radar-item-head">
+          <span class="radar-handle">@${handle}</span>
+          ${badge}
+        </div>
+        <small class="hint" title="${title}">${title}</small>
+        <div class="discover-actions">
+          <button type="button" class="btn btn-sm btn-accent-sm" data-action="restream" data-url="${liveUrl}" data-title="${esc(item.title || '')}" data-handle="${handle}">▶ Retransmitir</button>
+          <button type="button" class="btn btn-sm btn-neutral-sm" data-action="monitor" data-url="${liveUrl}" data-handle="${handle}">🤖 Vigilar</button>
+          <button type="button" class="btn btn-sm btn-danger-sm" data-action="unfollow" data-handle="${handle}" title="Quitar del Radar">🗑️</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderDiscoverResults() {
+  if (!dom.discoverResultsGrid) return;
+  const items = state.discover.items || [];
+
+  if (items.length === 0) {
+    dom.discoverResultsGrid.innerHTML = '<div class="empty-state-box">No se encontraron transmisiones en vivo con ese filtro. Prueba otra categoría o @usuario.</div>';
+    return;
+  }
+
+  dom.discoverResultsGrid.innerHTML = items.map((item) => {
+    const handle = esc(item.handle);
+    const nickname = esc(item.nickname || item.handle);
+    const title = esc(item.title || 'Transmisión en vivo');
+    const category = item.category ? ` • #${esc(item.category)}` : '';
+    const liveUrl = esc(item.live_url || `https://www.tiktok.com/@${item.handle}/live`);
+    const coverSrc = safeHttpImg(item.cover);
+    const avatarSrc = safeHttpImg(item.avatar);
+    const w = Number(item.width) || 0;
+    const h = Number(item.height) || 0;
+    const aspectLabel = w > 0 && h > 0 ? (w / h <= 0.72 ? '9:16 Vertical' : '16:9 Horiz.') : 'TikTok Live';
+    const followed = isInRadar(item.handle);
+
+    const statusPill = item.is_live
+      ? `<span class="discover-viewers-pill">🔴 ${formatViewers(item.viewers)} viewers</span>`
+      : `<span class="discover-viewers-pill" style="background: rgba(100,116,139,0.9);">⚫ Offline</span>`;
+
+    return `
+      <article class="discover-card">
+        <div class="discover-thumb-wrap">
+          ${coverSrc ? `<img class="discover-thumb" src="${esc(coverSrc)}" referrerpolicy="no-referrer" alt="@${handle}" onerror="this.style.display='none'" />` : ''}
+          ${statusPill}
+          <span class="discover-aspect-pill">${aspectLabel}</span>
+        </div>
+        <div class="discover-card-body">
+          <div class="discover-creator-row">
+            ${avatarSrc ? `<img class="discover-avatar" src="${esc(avatarSrc)}" referrerpolicy="no-referrer" alt="" onerror="this.style.display='none'" />` : ''}
+            <div class="discover-creator-meta">
+              <strong>@${handle}</strong>
+              <small>${nickname}${category}</small>
+            </div>
+          </div>
+          <div class="discover-title" title="${title}">${title}</div>
+          <div class="discover-actions">
+            <button type="button" class="btn btn-sm btn-accent-sm" data-action="restream" data-url="${liveUrl}" data-title="${esc(item.title || '')}" data-handle="${handle}">▶ Retransmitir</button>
+            <button type="button" class="btn btn-sm btn-neutral-sm" data-action="monitor" data-url="${liveUrl}" data-handle="${handle}">🤖 24/7</button>
+            <button type="button" class="btn btn-sm ${followed ? 'btn-neutral-sm' : 'btn-accent-sm'}" data-action="${followed ? 'unfollow' : 'follow'}" data-handle="${handle}" data-title="${esc(item.title || '')}">${followed ? '★ Siguiendo' : '⭐ Seguir'}</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+async function handleDiscoverSearch(forceRefresh = false, overrideKeyword = '') {
+  const kw = String(overrideKeyword || dom.discoverKeyword?.value || state.discover.lastKeyword || '').trim();
+  if (!kw) {
+    notify('Escribe una palabra clave o elige una categoría.', true);
+    return;
+  }
+  const minViewers = Number(dom.discoverMinViewers?.value) || 0;
+  state.discover.lastKeyword = kw;
+  state.discover.lastMinViewers = minViewers;
+  state.discover.lastMode = 'search';
+
+  if (dom.discoverSearchBtn) dom.discoverSearchBtn.disabled = true;
+  if (dom.discoverRefreshBtn) dom.discoverRefreshBtn.disabled = true;
+  setDiscoverBanner(`Buscando transmisiones en vivo de "${kw}"...`, 'info');
+
+  try {
+    const qs = new URLSearchParams({
+      q: kw,
+      limit: '18',
+      minViewers: String(minViewers)
+    });
+    if (forceRefresh) qs.set('refresh', '1');
+
+    const data = await apiJson(`/api/discovery/search?${qs.toString()}`);
+    if (data.blocked) {
+      setDiscoverBanner(`⚠️ ${data.error || 'TikTok devolvió verificación temporal/CAPTCHA. Espera unos minutos o actualiza tus cookies.'}`, 'warn');
+    } else if (!data.success && data.error) {
+      setDiscoverBanner(`⚠️ ${data.error}`, 'warn');
+    } else {
+      setDiscoverBanner('');
+    }
+
+    state.discover.items = Array.isArray(data.items) ? data.items : [];
+    if (dom.discoverResultsTitle) {
+      dom.discoverResultsTitle.textContent = `Resultados: "${kw}" (${state.discover.items.length})`;
+    }
+    if (dom.discoverCacheHint) {
+      dom.discoverCacheHint.textContent = data.cached
+        ? `Caché local (hace ${data.cacheAgeSec || 0}s)`
+        : 'Actualizado en tiempo real';
+    }
+    renderDiscoverResults();
+  } catch (err) {
+    setDiscoverBanner(`Error: ${err.message}`, 'warn');
+  } finally {
+    if (dom.discoverSearchBtn) dom.discoverSearchBtn.disabled = false;
+    if (dom.discoverRefreshBtn) dom.discoverRefreshBtn.disabled = false;
+  }
+}
+
+async function handleDiscoverLookup(overrideTarget = '') {
+  const raw = String(overrideTarget || dom.discoverKeyword?.value || '').trim();
+  if (!raw) {
+    notify('Escribe un @usuario o URL de TikTok en el buscador.', true);
+    return;
+  }
+  if (dom.discoverLookupBtn) dom.discoverLookupBtn.disabled = true;
+  setDiscoverBanner(`Consultando sala de "${raw}"...`, 'info');
+
+  try {
+    const data = await apiJson(`/api/discovery/lookup?target=${encodeURIComponent(raw)}&refresh=1`);
+    if (data.blocked) {
+      setDiscoverBanner(`⚠️ ${data.error || 'Verificación temporal de TikTok.'}`, 'warn');
+    } else if (!data.success && data.error) {
+      setDiscoverBanner(`⚠️ ${data.error}`, 'warn');
+    } else {
+      setDiscoverBanner('');
+    }
+
+    state.discover.items = data.handle ? [data] : [];
+    state.discover.lastMode = 'lookup';
+    if (dom.discoverResultsTitle) {
+      dom.discoverResultsTitle.textContent = data.handle ? `Usuario: @${data.handle}` : 'Consulta de Usuario';
+    }
+    if (dom.discoverCacheHint) {
+      dom.discoverCacheHint.textContent = data.is_live ? '🟢 Transmitiendo ahora' : '⚫ Offline en este momento';
+    }
+    renderDiscoverResults();
+  } catch (err) {
+    setDiscoverBanner(`Error: ${err.message}`, 'warn');
+  } finally {
+    if (dom.discoverLookupBtn) dom.discoverLookupBtn.disabled = false;
+  }
+}
+
+async function loadRadarStatus(forceRefresh = false) {
+  if (dom.radarCheckBtn) dom.radarCheckBtn.disabled = true;
+  try {
+    const qs = forceRefresh ? '?refresh=1' : '';
+    const data = await apiJson(`/api/discovery/radar${qs}`);
+    state.discover.radarLoadedOnce = true;
+    if (Array.isArray(data.items)) {
+      state.radar = data.items;
+    }
+    if (data.blocked) {
+      setDiscoverBanner(`⚠️ ${data.error || 'TikTok limitó temporalmente la consulta del Radar.'}`, 'warn');
+    }
+    renderRadarList();
+    renderDiscoverResults();
+  } catch (err) {
+    notify(err.message, true);
+  } finally {
+    if (dom.radarCheckBtn) dom.radarCheckBtn.disabled = false;
+  }
+}
+
+async function handleAddRadarCreator() {
+  const handle = String(dom.radarHandleInput?.value || '').trim();
+  const note = String(dom.radarNoteInput?.value || '').trim();
+  if (!handle) {
+    notify('Escribe un @usuario o URL de TikTok.', true);
+    return;
+  }
+  if (dom.radarAddBtn) dom.radarAddBtn.disabled = true;
+  try {
+    const data = await apiJson('/api/discovery/radar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle, note })
+    });
+    if (Array.isArray(data.radar)) {
+      syncRadarList(data.radar);
+    }
+    if (dom.radarHandleInput) dom.radarHandleInput.value = '';
+    if (dom.radarNoteInput) dom.radarNoteInput.value = '';
+    renderRadarList();
+    renderDiscoverResults();
+    notify(`@${data.entry?.handle || handle} agregado al Radar.`);
+  } catch (err) {
+    notify(err.message, true);
+  } finally {
+    if (dom.radarAddBtn) dom.radarAddBtn.disabled = false;
+  }
+}
+
+async function handleDiscoverCardAction(e) {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const handle = btn.dataset.handle || '';
+  const url = btn.dataset.url || (handle ? `https://www.tiktok.com/@${handle}/live` : '');
+  const title = btn.dataset.title || '';
+
+  if (action === 'restream' && url) {
+    switchTab('streams');
+    if (dom.sourceUrl) {
+      dom.sourceUrl.value = url;
+      dom.sourceUrl.focus();
+    }
+    if (dom.modeSelect) dom.modeSelect.value = 'vertical_blur';
+    if (dom.tiktokTitle && !dom.tiktokTitle.value.trim() && title) {
+      dom.tiktokTitle.value = title.slice(0, 60);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    notify(`Enlace de @${handle} cargado. Elige tu cuenta destino e inicia.`);
+    return;
+  }
+
+  if (action === 'monitor' && url) {
+    switchTab('monitors');
+    if (dom.monChannelUrl) dom.monChannelUrl.value = url;
+    if (dom.monName && handle) dom.monName.value = `@${handle}`;
+    if (dom.monMode) dom.monMode.value = 'vertical_blur';
+    if (dom.monAccountSelect) dom.monAccountSelect.focus();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    notify(`@${handle} cargado en Auto-Restreamer 24/7.`);
+    return;
+  }
+
+  if (action === 'follow' && handle) {
+    btn.disabled = true;
+    try {
+      const data = await apiJson('/api/discovery/radar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handle, note: title.slice(0, 60) })
+      });
+      if (Array.isArray(data.radar)) syncRadarList(data.radar);
+      renderRadarList();
+      renderDiscoverResults();
+      notify(`@${handle} guardado en tu Radar.`);
+    } catch (err) {
+      notify(err.message, true);
+      btn.disabled = false;
+    }
+    return;
+  }
+
+  if (action === 'unfollow' && handle) {
+    btn.disabled = true;
+    try {
+      const data = await apiJson(`/api/discovery/radar/${encodeURIComponent(handle)}`, {
+        method: 'DELETE'
+      });
+      if (Array.isArray(data.radar)) syncRadarList(data.radar);
+      renderRadarList();
+      renderDiscoverResults();
+      notify(`@${handle} eliminado del Radar.`);
+    } catch (err) {
+      notify(err.message, true);
+      btn.disabled = false;
+    }
+  }
+}
+
 // --- Bootstrap ---
 async function loadBootstrap() {
   const data = await apiJson('/api/bootstrap');
@@ -1453,6 +1869,8 @@ async function loadBootstrap() {
   state.tiktokTopics = data.tiktokTopics || [];
   state.accounts = data.accounts || [];
   state.monitors = data.monitors || [];
+  state.radar = data.radar || [];
+  state.discover.radarLoadedOnce = false;
 
   state.streams.clear();
   for (const s of data.streams || []) {
@@ -1491,6 +1909,8 @@ async function loadBootstrap() {
   renderAccounts();
   renderAccountSelect();
   renderMonitors();
+  renderRadarList();
+  renderDiscoverResults();
 
   if (last.accountId && state.accounts.some((a) => a.id === last.accountId)) {
     dom.accountSelect.value = last.accountId;

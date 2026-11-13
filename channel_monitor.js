@@ -1,6 +1,7 @@
 import { execFile } from 'child_process';
 import { EventEmitter } from 'events';
 import util from 'util';
+import { isTikTokLiveUrl, lookupTikTokRoom } from './tiktok_scraper.js';
 
 const execFileAsync = util.promisify(execFile);
 
@@ -175,16 +176,32 @@ export class ChannelMonitor extends EventEmitter {
     this.emitUpdate();
 
     try {
-      const { stdout } = await execFileAsync('yt-dlp', [
-        '--no-playlist',
-        '--js-runtimes', 'node',
-        '--extractor-args', 'youtube:player_client=ios,android,tv,mweb',
-        '--print', 'live_status',
-        '--print', 'id',
-        '--print', 'title',
-        '--print', 'webpage_url',
-        mon.channelUrl
-      ], { timeout: 20000 });
+      let stdout = '';
+      if (isTikTokLiveUrl(mon.channelUrl)) {
+        const room = await lookupTikTokRoom(mon.channelUrl, { timeoutMs: 18000 });
+        if (!room.success && room.blocked) {
+          throw new Error(room.error || 'TikTok bloqueó temporalmente la consulta');
+        }
+        const safeTitle = String(room.title || room.nickname || mon.name || '').replace(/[\r\n]+/g, ' ');
+        stdout = [
+          room.is_live ? 'is_live' : 'not_live',
+          room.room_id || '',
+          safeTitle,
+          room.live_url || mon.channelUrl
+        ].join('\n');
+      } else {
+        const res = await execFileAsync('yt-dlp', [
+          '--no-playlist',
+          '--js-runtimes', 'node',
+          '--extractor-args', 'youtube:player_client=ios,android,tv,mweb',
+          '--print', 'live_status',
+          '--print', 'id',
+          '--print', 'title',
+          '--print', 'webpage_url',
+          mon.channelUrl
+        ], { timeout: 20000 });
+        stdout = res.stdout;
+      }
 
       const lines = stdout.trim().split('\n').map((l) => l.trim());
       const liveStatus = lines[0] || '';

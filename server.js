@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { AccountStore } from './account_store.js';
 import { ChannelMonitor } from './channel_monitor.js';
+import { TikTokDiscoveryService } from './tiktok_scraper.js';
 import {
   StreamManager,
   QUALITY_PROFILES,
@@ -27,6 +28,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const store = new AccountStore();
 const manager = new StreamManager();
 const monitor = new ChannelMonitor(store, manager);
+const discovery = new TikTokDiscoveryService(store);
 
 const sseClients = new Set();
 
@@ -182,6 +184,7 @@ app.get('/api/bootstrap', (req, res) => {
     accounts: store.listAccountsSafe(),
     streams: manager.listStreams(),
     monitors: monitor.listWithStatus(),
+    radar: store.listRadar(),
     donationDefaults: store.getDonationDefaults(),
     lastConfig: store.getLastConfig(),
     system: manager.getSystemMetrics(),
@@ -414,6 +417,68 @@ app.delete('/api/monitors/:id', (req, res) => {
 });
 
 const PORT = process.env.PORT || store.getPort() || 9090;
+// ==========================================
+// 5. TIKTOK DISCOVERY & RADAR SCRAPER
+// ==========================================
+app.get('/api/discovery/search', async (req, res) => {
+  const keyword = String(req.query.q || '').trim();
+  if (!keyword) {
+    return res.status(400).json({ error: 'El parámetro q (palabra clave) es obligatorio.' });
+  }
+  const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const result = await discovery.searchLives({
+    keyword,
+    limit: req.query.limit,
+    offset: req.query.offset,
+    minViewers: req.query.minViewers,
+    forceRefresh
+  });
+  res.json(result);
+});
+
+app.get('/api/discovery/lookup', async (req, res) => {
+  const target = String(req.query.target || '').trim();
+  if (!target) {
+    return res.status(400).json({ error: 'El parámetro target (@usuario o URL) es obligatorio.' });
+  }
+  const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const result = await discovery.lookupUser(target, { forceRefresh });
+  res.json(result);
+});
+
+app.get('/api/discovery/radar', async (req, res) => {
+  const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+  const result = await discovery.checkRadar({ forceRefresh });
+  res.json({
+    ...result,
+    savedCount: store.listRadar().length
+  });
+});
+
+app.post('/api/discovery/radar', (req, res) => {
+  try {
+    const entry = store.addRadarCreator({
+      handle: req.body?.handle,
+      note: req.body?.note
+    });
+    discovery.invalidateRadarCache();
+    res.status(201).json({ entry, radar: store.listRadar() });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/discovery/radar/:handle', (req, res) => {
+  try {
+    const result = store.removeRadarCreator(req.params.handle);
+    discovery.invalidateRadarCache();
+    res.json({ ...result, radar: store.listRadar() });
+  } catch (err) {
+    const code = err.message.includes('no encontrado') ? 404 : 400;
+    res.status(code).json({ error: err.message });
+  }
+});
+
 let server;
 
 async function startServer() {
@@ -434,6 +499,7 @@ async function gracefulShutdown(sig) {
   shuttingDown = true;
   console.log(`[Server] Señal ${sig} recibida; cerrando monitores y streams activos...`);
   monitor.stop();
+  discovery.destroy();
   try {
     await manager.stopAll();
   } catch {}
